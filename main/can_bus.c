@@ -16,6 +16,8 @@
 #define RX_QUEUE_DEPTH 32
 #define RX_TASK_STACK_SIZE 4096
 #define RX_TASK_PRIORITY 8
+#define TEST_TX_TASK_STACK_SIZE 4096
+#define TEST_TX_TASK_PRIORITY 5
 
 typedef struct {
     twai_frame_header_t header;
@@ -167,6 +169,65 @@ esp_err_t meb_can_send_heat_request(void)
     return transmit_fd_frame(MEB_CAN_ID_DIAG_REQ, data, "heat_request");
 }
 
+static void can_test_tx_task(void *arg)
+{
+    (void)arg;
+    uint8_t counter = 0;
+
+    while (1) {
+        uint8_t data[8] = {
+            0xCA, 0xFE, 0xBA, 0xBE, counter, (uint8_t)~counter, 0x55, 0xAA,
+        };
+
+        (void)transmit_fd_frame(MEB_CAN_TEST_TX_ID, data, "test_tx");
+        counter++;
+        vTaskDelay(pdMS_TO_TICKS(MEB_CAN_TEST_TX_PERIOD_MS));
+    }
+}
+
+esp_err_t meb_can_start_test_tx(void)
+{
+#if MEB_CAN_TEST_TX_ENABLED
+    BaseType_t ok = xTaskCreate(can_test_tx_task, "can_test_tx", TEST_TX_TASK_STACK_SIZE, NULL,
+                                TEST_TX_TASK_PRIORITY, NULL);
+    ESP_RETURN_ON_FALSE(ok == pdPASS, ESP_ERR_NO_MEM, TAG, "failed to create CAN test TX task");
+    ESP_LOGW(TAG, "temporary CAN test TX enabled: ID 0x%" PRIX32 " every %d ms",
+             (uint32_t)MEB_CAN_TEST_TX_ID, MEB_CAN_TEST_TX_PERIOD_MS);
+#endif
+    return ESP_OK;
+}
+
+static esp_err_t configure_exact_canfd_timing(void)
+{
+    const twai_timing_advanced_config_t bit_timing = {
+        .brp = 4,
+        .prop_seg = 8,
+        .tseg_1 = 26,
+        .tseg_2 = 5,
+        .sjw = 2,
+    };
+    twai_timing_advanced_config_t data_timing = {
+        .prop_seg = 8,
+        .tseg_1 = 26,
+        .tseg_2 = 5,
+        .sjw = 2,
+    };
+
+    switch (MEB_TWAI_DATA_BITRATE) {
+    case 1000000:
+        data_timing.brp = 2;
+        break;
+    case 2000000:
+        data_timing.brp = 1;
+        break;
+    default:
+        ESP_LOGE(TAG, "unsupported exact CAN FD data bitrate: %d", MEB_TWAI_DATA_BITRATE);
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    return twai_node_reconfig_timing(s_twai_node, &bit_timing, &data_timing);
+}
+
 esp_err_t meb_can_init(void)
 {
     s_rx_queue = xQueueCreate(RX_QUEUE_DEPTH, sizeof(meb_can_rx_message_t));
@@ -179,6 +240,7 @@ esp_err_t meb_can_init(void)
             .quanta_clk_out = GPIO_NUM_NC,
             .bus_off_indicator = GPIO_NUM_NC,
         },
+        .clk_src = TWAI_CLK_SRC_PLL_F80M,
         .bit_timing = {
             .bitrate = MEB_TWAI_BITRATE,
         },
@@ -194,6 +256,7 @@ esp_err_t meb_can_init(void)
     };
 
     ESP_RETURN_ON_ERROR(twai_new_node_onchip(&node_config, &s_twai_node), TAG, "failed to create TWAI node");
+    ESP_RETURN_ON_ERROR(configure_exact_canfd_timing(), TAG, "failed to configure exact TWAI timing");
 
     twai_range_filter_config_t filter = {
         .range_low = 0x12000000U,

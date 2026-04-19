@@ -28,6 +28,11 @@
 #define MEB_TELEMETRY_MAX_PERIOD_MS 60000
 #define MEB_LED_PERIOD_MS 100
 
+// Temporary bench-test CAN transmitter. Set to 0 before connecting to a real car.
+#define MEB_CAN_TEST_TX_ENABLED 0
+#define MEB_CAN_TEST_TX_ID 0x12345678U
+#define MEB_CAN_TEST_TX_PERIOD_MS 500
+
 #define MEB_CAN_ID_DIAG_REQ 0x17FC007BU
 #define MEB_CAN_ID_DIAG_RESP 0x17FE007BU
 #define MEB_CAN_ID_HEATING_STATUS 0x12DD54D2U

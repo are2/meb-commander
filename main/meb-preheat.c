@@ -18,6 +18,7 @@ void app_main(void)
     ESP_ERROR_CHECK(meb_ble_console_init());
     ESP_ERROR_CHECK(meb_status_led_start());
     ESP_ERROR_CHECK(meb_can_init());
+    ESP_ERROR_CHECK(meb_can_start_test_tx());
     ESP_ERROR_CHECK(meb_control_start());
 
     ESP_LOGI(TAG, "MEB preheat controller running");
