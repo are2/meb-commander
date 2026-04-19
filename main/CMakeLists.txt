@@ -5,6 +5,7 @@ idf_component_register(
         "can_bus.c"
         "control.c"
         "meb-preheat.c"
+        "ota_update.c"
         "serial_console.c"
         "status_led.c"
     INCLUDE_DIRS "."
@@ -12,6 +13,7 @@ idf_component_register(
         esp_driver_twai
         esp_driver_uart
         esp_driver_gpio
+        app_update
         esp_system
         esp_timer
         bt

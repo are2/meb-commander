@@ -28,9 +28,9 @@
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
 
-#define BLE_CMD_RX_BUF_SIZE 256
+#define BLE_CMD_RX_BUF_SIZE 1024
 #define BLE_CMD_QUEUE_DEPTH 8
-#define BLE_CMD_TASK_STACK_SIZE 4096
+#define BLE_CMD_TASK_STACK_SIZE 8192
 #define BLE_CMD_TASK_PRIORITY 5
 #define BLE_NOTIFY_MIN_CHUNK_SIZE 20
 

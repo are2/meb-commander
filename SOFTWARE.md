@@ -1,8 +1,8 @@
 # MEB Preheat ESP32 Software
 
-This firmware runs on an ESP32-C5 connected to a Volkswagen MEB platform CAN FD bus. It observes battery thermal status frames and, when the user enables heating over the devboard's UART USB connector, periodically sends the diagnostic routine used by the older firmware to request battery preheating.
+This firmware runs on an ESP32-C5 connected to a Volkswagen MEB platform CAN FD bus. It observes battery thermal status frames and, when the user enables heating over the devboard's UART USB or BLE connection, periodically sends the diagnostic routine to request battery preheating.
 
-The command channel is UART0 at 115200 bit/s through the development board's USB-to-UART bridge, usually the connector labelled `UART`. The same newline-delimited JSON-RPC and telemetry stream is also exposed over Bluetooth LE as a custom GATT service named `MEB-Preheat`. The active firmware pin mapping is defined in `main/app_config.h`. The native ESP32-C5 `USB` / USB Serial/JTAG peripheral remains enabled for normal USB-JTAG/debug enumeration, but it is not used for the JSON-RPC and telemetry protocol at this point, and there is no auxiliary USART1-style command interface.
+The command channel is UART0 at 115200 bit/s through the development board's USB-to-UART bridge, usually the connector labelled `UART`. The same newline-delimited JSON-RPC and telemetry stream is also exposed over Bluetooth LE as a custom GATT service named `MEB-Preheat`. The active firmware pin mapping is defined in `main/app_config.h`. The native ESP32-C5 `USB` / USB Serial/JTAG peripheral remains enabled for normal USB-JTAG/debug enumeration, but it is not used for the JSON-RPC and telemetry protocol at this point..
 
 ## Runtime Flow
 
@@ -118,6 +118,7 @@ Supported methods:
 {"jsonrpc":"2.0","id":2,"method":"heating.get"}
 {"jsonrpc":"2.0","id":3,"method":"device.info"}
 {"jsonrpc":"2.0","id":4,"method":"telemetry.set_interval","params":{"ms":1000}}
+{"jsonrpc":"2.0","id":5,"method":"firmware.status"}
 ```
 
 JSON-RPC success response examples:
@@ -135,6 +136,73 @@ JSON-RPC error response example:
 ```
 
 `telemetry.set_interval` accepts `params.ms` from `100` to `60000`.
+
+## Firmware Update Protocol
+
+Firmware can be updated through the same newline-delimited JSON-RPC stream used by USB-to-UART and BLE. The firmware image is not sent as one large command. Instead, the host starts an OTA session, sends base64-encoded chunks, finalizes the image, then asks the device to reboot into the new partition.
+
+The flash layout uses two OTA app slots:
+
+| Partition | Offset | Size |
+| --- | --- | --- |
+| `ota_0` | `0x20000` | `0xE0000` |
+| `ota_1` | `0x100000` | `0xE0000` |
+
+Each app image must fit in one OTA slot. With the current 2 MB flash configuration, that means the firmware binary must be no larger than `917504` bytes.
+
+Devices currently flashed with the old single-app partition table need one normal bootloader flash first so the partition table, bootloader metadata, and OTA-capable app are installed together. After that first migration, later firmware images can be delivered through `firmware.*` over USB-to-UART or BLE.
+
+The update protocol verifies transfer integrity with a required SHA-256 digest of the complete `.bin` image. Signed firmware / secure boot is not enabled at this point, so SHA-256 only detects corruption or the wrong file; it does not prove the image came from a trusted signer.
+
+OTA methods:
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `firmware.begin` | `size` in bytes, `sha256` lowercase or uppercase hex digest | OTA status |
+| `firmware.write` | `offset` byte offset, `data` base64 chunk | `received`, `written`, `expected_size` |
+| `firmware.end` | none | OTA status with `pending_reboot:true` |
+| `firmware.cancel` | none | OTA status after aborting an active update, or clearing a pending reboot |
+| `firmware.status` | none | OTA status |
+| `firmware.reboot` | none | Reboots after a successfully finalized update |
+
+OTA status example:
+
+```json
+{"active":true,"pending_reboot":false,"written":0,"expected_size":823456,"partition":"ota_1","partition_size":917504,"has_sha256":true,"max_base64_chars":768}
+```
+
+Update sequence:
+
+```json
+{"jsonrpc":"2.0","id":10,"method":"firmware.begin","params":{"size":823456,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}}
+{"jsonrpc":"2.0","id":11,"method":"firmware.write","params":{"offset":0,"data":"base64..."}}
+{"jsonrpc":"2.0","id":12,"method":"firmware.write","params":{"offset":576,"data":"base64..."}}
+{"jsonrpc":"2.0","id":13,"method":"firmware.end"}
+{"jsonrpc":"2.0","id":14,"method":"firmware.reboot"}
+```
+
+Host requirements:
+
+| Requirement | Details |
+| --- | --- |
+| Chunk order | Chunks must be sent in strict order. `params.offset` must equal the number of raw bytes already accepted. |
+| Chunk size | `params.data` can contain at most `768` base64 characters, which carries up to `576` raw bytes. The helper updater defaults to `384` raw bytes per chunk for BLE stability. Smaller chunks are allowed, including the final chunk. |
+| Acknowledgement | Wait for each `firmware.write` response before sending the next chunk. This avoids overrunning the UART/BLE command queues and makes recovery deterministic. |
+| BLE framing | A JSON-RPC line may be split across multiple BLE writes, but the complete JSON object must end with `\n`. |
+| UART framing | Send one newline-terminated JSON object per command over the USB-to-UART bridge. |
+| Recovery | If a chunk fails, query `firmware.status` and resume at the returned `written` offset, or call `firmware.cancel` and start over. |
+
+`firmware.end` checks the received byte count, validates the SHA-256 digest, asks ESP-IDF to validate the image, and marks the new OTA partition as the next boot target. The device keeps running the old firmware until `firmware.reboot` is called or the device is otherwise reset.
+
+The helper updater can drive this protocol over either transport:
+
+```powershell
+python -m pip install pyserial bleak
+python scripts\meb_ota_update.py --serial COM5 build\meb-preheat.bin --reboot
+python scripts\meb_ota_update.py --ble build\meb-preheat.bin --reboot
+```
+
+Only one program can own the USB-to-UART COM port on Windows. Close ESP-IDF Monitor, VS Code serial monitor, PuTTY, or other serial tools before running the serial updater.
 
 ## Bluetooth LE Protocol
 
@@ -195,7 +263,9 @@ The native connector labelled `USB` / USB Serial/JTAG is kept enabled for debug/
 | `main/app_state.c` | Shared state updated by CAN and read by control, telemetry, and LED tasks. |
 | `main/can_bus.c` | TWAI FD setup, RX dispatch, diagnostic session TX, heat request TX. |
 | `main/control.c` | Heating request state machine, versioned telemetry events, and telemetry interval setting. |
+| `main/ota_update.c` | Chunked firmware update state machine using ESP-IDF OTA partitions. |
 | `main/status_led.c` | Four-color LED status logic. |
 | `main/serial_console.c` | UART0 JSON-RPC command parser and JSON output. |
 | `main/ble_console.c` | BLE GATT RX/TX bridge for the same JSON-RPC and telemetry stream. |
 | `scripts/meb_ble_client.py` | Python Bleak client for BLE JSON-RPC commands and telemetry notifications. |
+| `scripts/meb_ota_update.py` | Python OTA uploader for USB-to-UART and BLE firmware updates. |
