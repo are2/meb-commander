@@ -2,7 +2,7 @@
 #include "app_config.h"
 #include "app_state.h"
 #include "can_bus.h"
-#include "usb_console.h"
+#include "serial_console.h"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -53,7 +53,7 @@ static void control_task(void *arg)
 
         if (state.heating_enabled && state.temperature_status_charge == MEB_TEMPERATURE_STATUS_UNDER_OPTIMAL) {
             if (meb_state_take_session_error()) {
-                meb_usb_printf("{\"v\":%d,\"type\":\"control.diag_session_retry\"}\n", MEB_PROTOCOL_VERSION);
+                meb_serial_printf("{\"v\":%d,\"type\":\"control.diag_session_retry\"}\n", MEB_PROTOCOL_VERSION);
                 (void)meb_can_request_diag_session();
             } else {
                 (void)meb_can_send_heat_request();
@@ -73,45 +73,45 @@ static void telemetry_task(void *arg)
         meb_state_snapshot_t state;
         meb_state_get_snapshot(&state);
 
-        meb_usb_printf("{"
-                       "\"v\":%d,"
-                       "\"type\":\"telemetry\","
-                       "\"ts_ms\":%llu,"
-                       "\"heating\":{"
-                           "\"active\":%u,"
-                           "\"request\":%u,"
-                           "\"cooling_request\":%u,"
-                           "\"power_w\":%u,"
-                           "\"power_req_w\":%u"
-                       "},"
-                       "\"thermal\":{"
-                           "\"status\":%u"
-                       "},"
-                       "\"predicted\":{"
-                           "\"power_kw\":%.1f,"
-                           "\"current_a\":%.1f"
-                       "},"
-                       "\"battery_temp_c\":{"
-                           "\"min\":%.1f,"
-                           "\"max\":%.1f"
-                       "},"
-                       "\"control\":{"
-                           "\"heating_enabled\":%s"
-                       "}"
-                       "}\n",
-                       MEB_PROTOCOL_VERSION,
-                       (unsigned long long)(esp_timer_get_time() / 1000ULL),
-                       state.battery_heating_active,
-                       state.heating_request,
-                       state.cooling_request,
-                       state.power_battery_heating_watt,
-                       state.power_battery_heating_req_watt,
-                       state.temperature_status_charge,
-                       state.max_charge_power_kw,
-                       state.max_charge_current_amp,
-                       state.battery_min_temp,
-                       state.battery_max_temp,
-                       state.heating_enabled ? "true" : "false");
+        meb_serial_printf("{"
+                          "\"v\":%d,"
+                          "\"type\":\"telemetry\","
+                          "\"ts_ms\":%llu,"
+                          "\"heating\":{"
+                              "\"active\":%u,"
+                              "\"request\":%u,"
+                              "\"cooling_request\":%u,"
+                              "\"power_w\":%u,"
+                              "\"power_req_w\":%u"
+                          "},"
+                          "\"thermal\":{"
+                              "\"status\":%u"
+                          "},"
+                          "\"predicted\":{"
+                              "\"power_kw\":%.1f,"
+                              "\"current_a\":%.1f"
+                          "},"
+                          "\"battery_temp_c\":{"
+                              "\"min\":%.1f,"
+                              "\"max\":%.1f"
+                          "},"
+                          "\"control\":{"
+                              "\"heating_enabled\":%s"
+                          "}"
+                          "}\n",
+                          MEB_PROTOCOL_VERSION,
+                          (unsigned long long)(esp_timer_get_time() / 1000ULL),
+                          state.battery_heating_active,
+                          state.heating_request,
+                          state.cooling_request,
+                          state.power_battery_heating_watt,
+                          state.power_battery_heating_req_watt,
+                          state.temperature_status_charge,
+                          state.max_charge_power_kw,
+                          state.max_charge_current_amp,
+                          state.battery_min_temp,
+                          state.battery_max_temp,
+                          state.heating_enabled ? "true" : "false");
 
         vTaskDelay(pdMS_TO_TICKS(interval_ms));
     }

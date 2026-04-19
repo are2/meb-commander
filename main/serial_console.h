@@ -1,0 +1,6 @@
+#pragma once
+
+#include "esp_err.h"
+
+esp_err_t meb_serial_console_init(void);
+void meb_serial_printf(const char *fmt, ...);

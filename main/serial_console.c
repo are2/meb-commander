@@ -1,21 +1,25 @@
-#include "usb_console.h"
+#include "serial_console.h"
 #include "app_config.h"
 #include "app_state.h"
 #include "control.h"
 
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include "driver/usb_serial_jtag.h"
+#include "driver/uart.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #define CMD_RX_BUF_SIZE 256
-#define USB_TASK_STACK_SIZE 4096
-#define USB_TASK_PRIORITY 5
+#define HOST_UART_NUM UART_NUM_0
+#define HOST_UART_RX_BUF_SIZE 1024
+#define HOST_UART_TX_BUF_SIZE 2048
+#define HOST_TASK_STACK_SIZE 4096
+#define HOST_TASK_PRIORITY 5
 #define JSONRPC_ID_BUF_SIZE 64
 #define JSONRPC_METHOD_BUF_SIZE 48
 
@@ -24,8 +28,8 @@
 #define JSONRPC_METHOD_NOT_FOUND -32601
 #define JSONRPC_INVALID_PARAMS -32602
 
-static const char *TAG = "usb_console";
-static SemaphoreHandle_t s_usb_write_lock;
+static const char *TAG = "serial_console";
+static SemaphoreHandle_t s_uart_write_lock;
 
 static const char *skip_ws(const char *p)
 {
@@ -198,7 +202,7 @@ static bool parse_required_string_key(const char *json, const char *key, char *o
     return parse_string_value(find_key_value(json, key), out, out_len);
 }
 
-void meb_usb_printf(const char *fmt, ...)
+void meb_serial_printf(const char *fmt, ...)
 {
     char buf[1024];
     va_list args;
@@ -214,21 +218,21 @@ void meb_usb_printf(const char *fmt, ...)
         len = sizeof(buf) - 1;
     }
 
-    if (s_usb_write_lock) {
-        xSemaphoreTake(s_usb_write_lock, portMAX_DELAY);
+    if (s_uart_write_lock) {
+        xSemaphoreTake(s_uart_write_lock, portMAX_DELAY);
     }
-    if (usb_serial_jtag_is_driver_installed()) {
-        (void)usb_serial_jtag_write_bytes(buf, len, pdMS_TO_TICKS(100));
+    if (uart_is_driver_installed(HOST_UART_NUM)) {
+        (void)uart_write_bytes(HOST_UART_NUM, buf, len);
     }
-    if (s_usb_write_lock) {
-        xSemaphoreGive(s_usb_write_lock);
+    if (s_uart_write_lock) {
+        xSemaphoreGive(s_uart_write_lock);
     }
 }
 
 static void send_rpc_error(const char *id_token, int code, const char *message)
 {
-    meb_usb_printf("{\"jsonrpc\":\"2.0\",\"id\":%s,\"error\":{\"code\":%d,\"message\":\"%s\"}}\n",
-                   id_token ? id_token : "null", code, message);
+    meb_serial_printf("{\"jsonrpc\":\"2.0\",\"id\":%s,\"error\":{\"code\":%d,\"message\":\"%s\"}}\n",
+                      id_token ? id_token : "null", code, message);
 }
 
 static void send_rpc_result(bool has_id, const char *id_token, const char *result_fmt, ...)
@@ -253,7 +257,7 @@ static void send_rpc_result(bool has_id, const char *id_token, const char *resul
         return;
     }
 
-    meb_usb_printf("{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":%s}\n", id_token, result);
+    meb_serial_printf("{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":%s}\n", id_token, result);
 }
 
 static void handle_heating_set(bool has_id, const char *id_token, const char *cmd)
@@ -291,11 +295,15 @@ static void handle_device_info(bool has_id, const char *id_token)
 {
     send_rpc_result(has_id, id_token,
                     "{\"version\":\"%s\",\"about\":\"%s\",\"protocol_version\":%d,"
+                    "\"serial\":{\"uart\":0,\"baud_rate\":%d,\"tx_gpio\":%d,\"rx_gpio\":%d},"
                     "\"telemetry_interval_ms\":%u,\"can\":{\"tx_gpio\":%d,\"rx_gpio\":%d,"
                     "\"bitrate\":%d,\"data_bitrate\":%d}}",
                     MEB_APP_VERSION,
                     MEB_APP_ABOUT,
                     MEB_PROTOCOL_VERSION,
+                    MEB_HOST_UART_BAUD_RATE,
+                    MEB_HOST_UART_TX_GPIO,
+                    MEB_HOST_UART_RX_GPIO,
                     meb_control_get_telemetry_interval_ms(),
                     MEB_TWAI_TX_GPIO,
                     MEB_TWAI_RX_GPIO,
@@ -329,8 +337,11 @@ static void process_command(const char *cmd)
     char jsonrpc[8];
     char method[JSONRPC_METHOD_BUF_SIZE];
 
-    if (!cmd || *skip_ws(cmd) != '{') {
-        send_rpc_error("null", JSONRPC_PARSE_ERROR, "Parse error");
+    if (!cmd || *skip_ws(cmd) == '\0') {
+        return;
+    }
+
+    if (*skip_ws(cmd) != '{') {
         return;
     }
 
@@ -358,7 +369,7 @@ static void process_command(const char *cmd)
     }
 }
 
-static void usb_command_task(void *arg)
+static void uart_command_task(void *arg)
 {
     (void)arg;
     char cmd_buf[CMD_RX_BUF_SIZE];
@@ -366,7 +377,7 @@ static void usb_command_task(void *arg)
 
     while (1) {
         uint8_t chunk[64];
-        int nread = usb_serial_jtag_read_bytes(chunk, sizeof(chunk), pdMS_TO_TICKS(100));
+        int nread = uart_read_bytes(HOST_UART_NUM, chunk, sizeof(chunk), pdMS_TO_TICKS(100));
 
         for (int i = 0; i < nread; i++) {
             uint8_t c = chunk[i];
@@ -375,6 +386,10 @@ static void usb_command_task(void *arg)
                     cmd_buf[cmd_len] = '\0';
                     process_command(cmd_buf);
                     cmd_len = 0;
+                }
+            } else if (cmd_len == 0) {
+                if (c == '{') {
+                    cmd_buf[cmd_len++] = (char)c;
                 }
             } else if (cmd_len < (sizeof(cmd_buf) - 1)) {
                 cmd_buf[cmd_len++] = (char)c;
@@ -387,26 +402,47 @@ static void usb_command_task(void *arg)
     }
 }
 
-esp_err_t meb_usb_console_init(void)
+esp_err_t meb_serial_console_init(void)
 {
-    s_usb_write_lock = xSemaphoreCreateMutex();
-    if (!s_usb_write_lock) {
+    s_uart_write_lock = xSemaphoreCreateMutex();
+    if (!s_uart_write_lock) {
         return ESP_ERR_NO_MEM;
     }
 
-    if (!usb_serial_jtag_is_driver_installed()) {
-        usb_serial_jtag_driver_config_t config = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
-        esp_err_t err = usb_serial_jtag_driver_install(&config);
-        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+    uart_config_t config = {
+        .baud_rate = MEB_HOST_UART_BAUD_RATE,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+
+    esp_err_t err = uart_param_config(HOST_UART_NUM, &config);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = uart_set_pin(HOST_UART_NUM, MEB_HOST_UART_TX_GPIO, MEB_HOST_UART_RX_GPIO,
+                       UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    if (!uart_is_driver_installed(HOST_UART_NUM)) {
+        err = uart_driver_install(HOST_UART_NUM, HOST_UART_RX_BUF_SIZE, HOST_UART_TX_BUF_SIZE, 0, NULL, 0);
+        if (err != ESP_OK) {
             return err;
         }
     }
+    uart_flush_input(HOST_UART_NUM);
 
-    BaseType_t ok = xTaskCreate(usb_command_task, "usb_cmd", USB_TASK_STACK_SIZE, NULL, USB_TASK_PRIORITY, NULL);
+    BaseType_t ok = xTaskCreate(uart_command_task, "uart_cmd", HOST_TASK_STACK_SIZE, NULL, HOST_TASK_PRIORITY, NULL);
     if (ok != pdPASS) {
         return ESP_ERR_NO_MEM;
     }
 
-    ESP_LOGI(TAG, "USB Serial/JTAG JSON-RPC command interface ready");
+    ESP_LOGI(TAG, "UART0 JSON-RPC command interface ready on TX GPIO %d / RX GPIO %d at %d bit/s",
+             MEB_HOST_UART_TX_GPIO, MEB_HOST_UART_RX_GPIO, MEB_HOST_UART_BAUD_RATE);
     return ESP_OK;
 }

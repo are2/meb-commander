@@ -4,12 +4,12 @@ idf_component_register(
         "can_bus.c"
         "control.c"
         "meb-preheat.c"
+        "serial_console.c"
         "status_led.c"
-        "usb_console.c"
     INCLUDE_DIRS "."
     REQUIRES
         esp_driver_twai
-        esp_driver_usb_serial_jtag
+        esp_driver_uart
         esp_driver_gpio
         esp_system
         esp_timer

@@ -1,27 +1,27 @@
 # MEB Preheat ESP32 Software
 
-This firmware runs on an ESP32-C5 connected to a Volkswagen MEB platform CAN FD bus. It observes battery thermal status frames and, when the user enables heating over USB serial, periodically sends the diagnostic routine used by the older firmware to request battery preheating.
+This firmware runs on an ESP32-C5 connected to a Volkswagen MEB platform CAN FD bus. It observes battery thermal status frames and, when the user enables heating over the devboard's UART USB connector, periodically sends the diagnostic routine used by the older firmware to request battery preheating.
 
-The code intentionally does not implement a USART1/UART pin command interface. Commands and telemetry use the ESP32-C5 native USB Serial/JTAG peripheral.
+The command channel is UART0 at 115200 bit/s through the development board's USB-to-UART bridge, usually the connector labelled `UART`. The active firmware pin mapping is defined in `main/app_config.h`. The native ESP32-C5 `USB` / USB Serial/JTAG peripheral remains enabled for normal USB-JTAG/debug enumeration, but it is not used for the JSON-RPC and telemetry protocol at this point, and there is no auxiliary USART1-style command interface.
 
 ## Runtime Flow
 
 ```mermaid
 flowchart TD
     Boot[Boot app_main] --> State[Initialize shared state]
-    State --> USB[Start USB Serial/JTAG command task]
-    USB --> LED[Start WS2812 status LED task]
+    State --> Serial[Start UART0 JSON-RPC task]
+    Serial --> LED[Start WS2812 status LED task]
     LED --> CAN[Start TWAI FD node]
     CAN --> RX[CAN RX task updates state]
     CAN --> Control[Control task every 500 ms]
-    USB --> Commands[JSON-RPC command parser]
+    Serial --> Commands[JSON-RPC command parser]
     Commands --> UserEnable[Set heating_enabled]
     Control --> Decision{User enabled and battery under optimal?}
     Decision -->|No| Wait[Wait]
     Decision -->|Yes, previous routine rejected| Diag[Send extended diagnostic session]
     Decision -->|Yes| Heat[Send heat request routine]
     RX --> Telemetry[Telemetry task every 1 s]
-    Telemetry --> USBOut[Versioned NDJSON event to USB]
+    Telemetry --> SerialOut[Versioned NDJSON event to UART0]
     RX --> LEDState[LED color selection]
     UserEnable --> LEDState
 ```
@@ -70,7 +70,7 @@ The TWAI node is configured for CAN FD with 500 kbit/s arbitration bitrate and 2
 sequenceDiagram
     participant Car as MEB CAN bus
     participant ESP as ESP32-C5 firmware
-    participant Host as USB serial host
+    participant Host as UART USB host
 
     Host->>ESP: {"jsonrpc":"2.0","id":1,"method":"heating.set","params":{"enabled":true}}
     ESP-->>Host: {"jsonrpc":"2.0","id":1,"result":{"heating_enabled":true}}
@@ -101,9 +101,11 @@ Transmitted CAN frames:
 | `0x17FC007B` | `02 10 03 00 00 00 00 00` | After a diagnostic negative response to switch session. |
 | `0x17FC007B` | `07 2F 80 37 03 00 05 32` | Every 500 ms when user heating is enabled and battery temperature status is under optimal. |
 
-## USB Serial/JTAG Protocol
+## UART USB Protocol
 
-The USB command task reads one newline-terminated JSON object per line from the ESP32-C5 native USB Serial/JTAG device.
+The serial command task reads one newline-terminated JSON object per line from UART0 at 115200 8N1. On the development board, connect the cable to the `UART` USB port to use this protocol.
+
+UART0 is also ESP-IDF's default console, so early boot messages and `ESP_LOG*` lines may appear on the same serial stream. Host software should ignore non-JSON lines and process only complete JSON objects.
 
 Commands use JSON-RPC 2.0. Each request should include an `id`; if `id` is omitted, the request is treated as a notification and successful commands do not produce a response.
 
@@ -156,9 +158,10 @@ Pin defaults are defined in `main/app_config.h`.
 | CAN TX / TWAI TX | GPIO 4 | Output | Connect to the TXD input of the CAN FD transceiver. |
 | CAN RX / TWAI RX | GPIO 5 | Input | Connect to the RXD output of the CAN FD transceiver. |
 | Status LED data | GPIO 27 | Output | WS2812/NeoPixel style single RGB LED, GRB order. |
-| USB Serial/JTAG | Native USB pins | Bidirectional | Used for JSON-RPC commands and NDJSON telemetry events. No extra GPIO assignment. |
+| UART0 TX | GPIO 12 | Output | Connects to the USB-UART bridge RXD input. Used for JSON-RPC responses and NDJSON telemetry at 115200 8N1. |
+| UART0 RX | GPIO 11 | Input | Connects to the USB-UART bridge TXD output. Used for JSON-RPC commands at 115200 8N1. |
 
-No USART1/UART TX/RX pins are used by this firmware for the command channel.
+The native connector labelled `USB` / USB Serial/JTAG is kept enabled for debug/flash enumeration, but it is not used for this application protocol. No separate auxiliary USART1-style TX/RX command interface is implemented.
 
 ## Source Layout
 
@@ -170,4 +173,4 @@ No USART1/UART TX/RX pins are used by this firmware for the command channel.
 | `main/can_bus.c` | TWAI FD setup, RX dispatch, diagnostic session TX, heat request TX. |
 | `main/control.c` | Heating request state machine, versioned telemetry events, and telemetry interval setting. |
 | `main/status_led.c` | Four-color LED status logic. |
-| `main/usb_console.c` | USB Serial/JTAG JSON-RPC command parser and JSON output. |
+| `main/serial_console.c` | UART0 JSON-RPC command parser and JSON output. |
