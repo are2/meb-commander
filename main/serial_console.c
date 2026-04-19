@@ -1,6 +1,7 @@
 #include "serial_console.h"
 #include "app_config.h"
 #include "app_state.h"
+#include "ble_console.h"
 #include "control.h"
 
 #include <stdarg.h>
@@ -224,6 +225,7 @@ void meb_serial_printf(const char *fmt, ...)
     if (uart_is_driver_installed(HOST_UART_NUM)) {
         (void)uart_write_bytes(HOST_UART_NUM, buf, len);
     }
+    meb_ble_console_write(buf, (size_t)len);
     if (s_uart_write_lock) {
         xSemaphoreGive(s_uart_write_lock);
     }
@@ -296,6 +298,7 @@ static void handle_device_info(bool has_id, const char *id_token)
     send_rpc_result(has_id, id_token,
                     "{\"version\":\"%s\",\"about\":\"%s\",\"protocol_version\":%d,"
                     "\"serial\":{\"uart\":0,\"baud_rate\":%d,\"tx_gpio\":%d,\"rx_gpio\":%d},"
+                    "\"ble\":{\"name\":\"%s\",\"service_uuid\":\"%s\",\"rx_uuid\":\"%s\",\"tx_uuid\":\"%s\"},"
                     "\"telemetry_interval_ms\":%u,\"can\":{\"tx_gpio\":%d,\"rx_gpio\":%d,"
                     "\"bitrate\":%d,\"data_bitrate\":%d}}",
                     MEB_APP_VERSION,
@@ -304,6 +307,10 @@ static void handle_device_info(bool has_id, const char *id_token)
                     MEB_HOST_UART_BAUD_RATE,
                     MEB_HOST_UART_TX_GPIO,
                     MEB_HOST_UART_RX_GPIO,
+                    MEB_BLE_DEVICE_NAME,
+                    MEB_BLE_SERVICE_UUID,
+                    MEB_BLE_RX_UUID,
+                    MEB_BLE_TX_UUID,
                     meb_control_get_telemetry_interval_ms(),
                     MEB_TWAI_TX_GPIO,
                     MEB_TWAI_RX_GPIO,
@@ -330,7 +337,7 @@ static void handle_telemetry_set_interval(bool has_id, const char *id_token, con
     send_rpc_result(has_id, id_token, "{\"interval_ms\":%u}", interval_ms);
 }
 
-static void process_command(const char *cmd)
+void meb_serial_console_process_command(const char *cmd)
 {
     char id_token[JSONRPC_ID_BUF_SIZE];
     bool has_id = false;
@@ -384,7 +391,7 @@ static void uart_command_task(void *arg)
             if (c == '\n' || c == '\r') {
                 if (cmd_len > 0) {
                     cmd_buf[cmd_len] = '\0';
-                    process_command(cmd_buf);
+                    meb_serial_console_process_command(cmd_buf);
                     cmd_len = 0;
                 }
             } else if (cmd_len == 0) {
@@ -395,7 +402,7 @@ static void uart_command_task(void *arg)
                 cmd_buf[cmd_len++] = (char)c;
             } else {
                 cmd_buf[cmd_len] = '\0';
-                process_command(cmd_buf);
+                meb_serial_console_process_command(cmd_buf);
                 cmd_len = 0;
             }
         }

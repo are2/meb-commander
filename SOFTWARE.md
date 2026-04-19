@@ -2,7 +2,7 @@
 
 This firmware runs on an ESP32-C5 connected to a Volkswagen MEB platform CAN FD bus. It observes battery thermal status frames and, when the user enables heating over the devboard's UART USB connector, periodically sends the diagnostic routine used by the older firmware to request battery preheating.
 
-The command channel is UART0 at 115200 bit/s through the development board's USB-to-UART bridge, usually the connector labelled `UART`. The active firmware pin mapping is defined in `main/app_config.h`. The native ESP32-C5 `USB` / USB Serial/JTAG peripheral remains enabled for normal USB-JTAG/debug enumeration, but it is not used for the JSON-RPC and telemetry protocol at this point, and there is no auxiliary USART1-style command interface.
+The command channel is UART0 at 115200 bit/s through the development board's USB-to-UART bridge, usually the connector labelled `UART`. The same newline-delimited JSON-RPC and telemetry stream is also exposed over Bluetooth LE as a custom GATT service named `MEB-Preheat`. The active firmware pin mapping is defined in `main/app_config.h`. The native ESP32-C5 `USB` / USB Serial/JTAG peripheral remains enabled for normal USB-JTAG/debug enumeration, but it is not used for the JSON-RPC and telemetry protocol at this point, and there is no auxiliary USART1-style command interface.
 
 ## Runtime Flow
 
@@ -10,18 +10,20 @@ The command channel is UART0 at 115200 bit/s through the development board's USB
 flowchart TD
     Boot[Boot app_main] --> State[Initialize shared state]
     State --> Serial[Start UART0 JSON-RPC task]
-    Serial --> LED[Start WS2812 status LED task]
+    Serial --> BLE[Start BLE JSON-RPC service]
+    BLE --> LED[Start WS2812 status LED task]
     LED --> CAN[Start TWAI FD node]
     CAN --> RX[CAN RX task updates state]
     CAN --> Control[Control task every 500 ms]
     Serial --> Commands[JSON-RPC command parser]
+    BLE --> Commands
     Commands --> UserEnable[Set heating_enabled]
     Control --> Decision{User enabled and battery under optimal?}
     Decision -->|No| Wait[Wait]
     Decision -->|Yes, previous routine rejected| Diag[Send extended diagnostic session]
     Decision -->|Yes| Heat[Send heat request routine]
     RX --> Telemetry[Telemetry task every 1 s]
-    Telemetry --> SerialOut[Versioned NDJSON event to UART0]
+    Telemetry --> SerialOut[Versioned NDJSON event to UART0 and BLE notify]
     RX --> LEDState[LED color selection]
     UserEnable --> LEDState
 ```
@@ -134,6 +136,27 @@ JSON-RPC error response example:
 
 `telemetry.set_interval` accepts `params.ms` from `100` to `60000`.
 
+## Bluetooth LE Protocol
+
+The firmware advertises as `MEB-Preheat` and exposes the same newline-delimited JSON-RPC stream over a custom BLE GATT service:
+
+| Item | UUID | Direction |
+| --- | --- | --- |
+| Service | `7e57c000-f8aa-4a1f-9af3-9c0b7fd90e00` | Discovery |
+| RX characteristic | `7e57c001-f8aa-4a1f-9af3-9c0b7fd90e00` | Host writes JSON lines to ESP32-C5 |
+| TX characteristic | `7e57c002-f8aa-4a1f-9af3-9c0b7fd90e00` | ESP32-C5 sends notifications to host |
+
+The BLE transport preserves the same one-JSON-object-per-line framing used by UART. Subscribe to TX notifications, then write UTF-8 JSON plus `\n` to RX. Notifications may be split by BLE MTU; host software should concatenate notification payloads until a newline is received.
+
+The helper client uses Python Bleak:
+
+```powershell
+python -m pip install bleak
+python scripts\meb_ble_client.py --info
+python scripts\meb_ble_client.py --enable --watch
+python scripts\meb_ble_client.py --disable
+```
+
 The firmware also emits versioned NDJSON events. These are not JSON-RPC responses, so host software should dispatch them by `type`.
 
 Telemetry event:
@@ -174,3 +197,5 @@ The native connector labelled `USB` / USB Serial/JTAG is kept enabled for debug/
 | `main/control.c` | Heating request state machine, versioned telemetry events, and telemetry interval setting. |
 | `main/status_led.c` | Four-color LED status logic. |
 | `main/serial_console.c` | UART0 JSON-RPC command parser and JSON output. |
+| `main/ble_console.c` | BLE GATT RX/TX bridge for the same JSON-RPC and telemetry stream. |
+| `scripts/meb_ble_client.py` | Python Bleak client for BLE JSON-RPC commands and telemetry notifications. |

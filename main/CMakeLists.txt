@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "app_state.c"
+        "ble_console.c"
         "can_bus.c"
         "control.c"
         "meb-preheat.c"
@@ -13,5 +14,7 @@ idf_component_register(
         esp_driver_gpio
         esp_system
         esp_timer
+        bt
+        nvs_flash
         espressif__led_strip
 )
