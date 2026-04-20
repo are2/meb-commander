@@ -53,7 +53,7 @@ static void control_task(void *arg)
 
         if (state.heating_enabled && state.temperature_status_charge == MEB_TEMPERATURE_STATUS_UNDER_OPTIMAL) {
             if (meb_state_take_session_error()) {
-                meb_serial_printf("{\"v\":%d,\"type\":\"control.diag_session_retry\"}\n", MEB_PROTOCOL_VERSION);
+                meb_serial_printf("{\"v\":%d,\"type\":\"control.diag_session_retry\"}\n", MEB_PREHEATER_PROTOCOL_VERSION);
                 (void)meb_can_request_diag_session();
             } else {
                 (void)meb_can_send_heat_request();
@@ -99,7 +99,7 @@ static void telemetry_task(void *arg)
                               "\"heating_enabled\":%s"
                           "}"
                           "}\n",
-                          MEB_PROTOCOL_VERSION,
+                          MEB_PREHEATER_PROTOCOL_VERSION,
                           (unsigned long long)(esp_timer_get_time() / 1000ULL),
                           state.battery_heating_active,
                           state.heating_request,

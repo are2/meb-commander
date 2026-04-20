@@ -4,7 +4,7 @@
 
 #define MEB_APP_VERSION "0.2.0"
 #define MEB_APP_ABOUT "MEB preheat CAN controller"
-#define MEB_PROTOCOL_VERSION 1
+#define MEB_PREHEATER_PROTOCOL_VERSION 2
 
 #define MEB_LED_GPIO GPIO_NUM_27
 #define MEB_LED_COUNT 1
