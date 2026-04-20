@@ -63,19 +63,67 @@ static rgb_t status_color(const meb_state_snapshot_t *state)
     return (rgb_t){.red = 0, .green = MEB_LED_BRIGHTNESS, .blue = 0};
 }
 
+static bool colors_equal(rgb_t a, rgb_t b)
+{
+    return a.red == b.red && a.green == b.green && a.blue == b.blue;
+}
+
+static esp_err_t show_color(rgb_t color)
+{
+    ESP_RETURN_ON_ERROR(led_strip_set_pixel(s_led_strip, 0, color.red, color.green, color.blue),
+                        TAG, "failed to set LED color");
+    return led_strip_refresh(s_led_strip);
+}
+
+static esp_err_t turn_led_off(void)
+{
+    return led_strip_clear(s_led_strip);
+}
+
+static TickType_t delay_ticks(uint32_t delay_ms)
+{
+    TickType_t ticks = pdMS_TO_TICKS(delay_ms);
+    return ticks > 0 ? ticks : 1;
+}
+
 static void led_task(void *arg)
 {
     (void)arg;
+    const TickType_t led_active_ticks = delay_ticks(MEB_LED_ACTIVE_MS);
+    const TickType_t led_period_ticks = delay_ticks(MEB_LED_PERIOD_MS);
+    const TickType_t led_off_ticks = led_period_ticks > led_active_ticks ? led_period_ticks - led_active_ticks : 1;
+    rgb_t last_color = {0};
+    bool has_last_color = false;
+    bool led_is_off = true;
 
     while (1) {
         meb_state_snapshot_t state;
         meb_state_get_snapshot(&state);
         rgb_t color = status_color(&state);
 
-        ESP_ERROR_CHECK(led_strip_set_pixel(s_led_strip, 0, color.red, color.green, color.blue));
-        ESP_ERROR_CHECK(led_strip_refresh(s_led_strip));
+        if (MEB_LED_SLEEP_OFF_ENABLED) {
+            ESP_ERROR_CHECK(show_color(color));
+            last_color = color;
+            has_last_color = true;
+            led_is_off = false;
 
-        vTaskDelay(pdMS_TO_TICKS(MEB_LED_PERIOD_MS));
+            vTaskDelay(led_active_ticks);
+
+            ESP_ERROR_CHECK(turn_led_off());
+            led_is_off = true;
+
+            vTaskDelay(led_off_ticks);
+            continue;
+        }
+
+        if (!has_last_color || !colors_equal(color, last_color) || led_is_off) {
+            ESP_ERROR_CHECK(show_color(color));
+            last_color = color;
+            has_last_color = true;
+            led_is_off = false;
+        }
+
+        vTaskDelay(led_period_ticks);
     }
 }
 

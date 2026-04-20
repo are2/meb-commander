@@ -1,15 +1,23 @@
 #pragma once
 
 #include "driver/gpio.h"
+#include "sdkconfig.h"
 
 #define MEB_APP_VERSION "0.2.0"
 #define MEB_APP_ABOUT "MEB preheat CAN controller"
 #define MEB_PROTOCOL_VERSION 1
 
+#define MEB_PM_MAX_CPU_FREQ_MHZ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ
+#define MEB_PM_MIN_CPU_FREQ_MHZ 48
+#define MEB_PM_JTAG_BOOT_GRACE_MS 30000
+#define MEB_PM_DEBUG_POLL_MS 250
+
 #define MEB_LED_GPIO GPIO_NUM_27
 #define MEB_LED_COUNT 1
 #define MEB_LED_RMT_RESOLUTION_HZ (10 * 1000 * 1000)
 #define MEB_LED_BRIGHTNESS 16
+#define MEB_LED_SLEEP_OFF_ENABLED 1
+#define MEB_LED_ACTIVE_MS 30
 
 #define MEB_HOST_UART_TX_GPIO GPIO_NUM_11
 #define MEB_HOST_UART_RX_GPIO GPIO_NUM_12
@@ -26,7 +34,7 @@
 #define MEB_TELEMETRY_PERIOD_MS 1000
 #define MEB_TELEMETRY_MIN_PERIOD_MS 100
 #define MEB_TELEMETRY_MAX_PERIOD_MS 60000
-#define MEB_LED_PERIOD_MS 100
+#define MEB_LED_PERIOD_MS 500
 
 // Temporary bench-test CAN transmitter. Set to 0 before connecting to a real car.
 #define MEB_CAN_TEST_TX_ENABLED 0
