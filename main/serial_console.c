@@ -306,7 +306,7 @@ static void handle_device_info(bool has_id, const char *id_token)
                     "\"bitrate\":%d,\"data_bitrate\":%d}}",
                     MEB_APP_VERSION,
                     MEB_APP_ABOUT,
-                    MEB_PROTOCOL_VERSION,
+                    MEB_PREHEATER_PROTOCOL_VERSION,
                     MEB_HOST_UART_BAUD_RATE,
                     MEB_HOST_UART_TX_GPIO,
                     MEB_HOST_UART_RX_GPIO,
