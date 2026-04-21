@@ -4,6 +4,18 @@ This firmware runs on an ESP32-C5 connected to a Volkswagen MEB platform CAN FD 
 
 The command channel is UART0 at 115200 bit/s through the development board's USB-to-UART bridge, usually the connector labelled `UART`. The same newline-delimited JSON-RPC and telemetry stream is also exposed over Bluetooth LE as a custom GATT service named `MEB-Preheat`. The active firmware pin mapping is defined in `main/app_config.h`. The native ESP32-C5 `USB` / USB Serial/JTAG peripheral remains enabled for normal USB-JTAG/debug enumeration, but it is not used for the JSON-RPC and telemetry protocol at this point..
 
+## Build Profiles
+
+The default build is the development profile. It keeps ESP-IDF automatic light sleep, BLE sleep, and tickless idle disabled so USB-JTAG flashing/debugging remains reliable.
+
+Production mode uses a separate generated config file and build directory:
+
+```powershell
+.\scripts\build_production.ps1
+```
+
+That command uses the normal `sdkconfig` as the base, applies `sdkconfig.defaults.production` as production overrides, writes generated config to `sdkconfig.production`, and places output under `build-production`. Production mode enables automatic light sleep and BLE modem sleep, so flash it with UART/serial if USB-JTAG becomes unreliable after the production firmware is running.
+
 ## Runtime Flow
 
 ```mermaid

@@ -75,11 +75,6 @@ static esp_err_t show_color(rgb_t color)
     return led_strip_refresh(s_led_strip);
 }
 
-static esp_err_t turn_led_off(void)
-{
-    return led_strip_clear(s_led_strip);
-}
-
 static TickType_t delay_ticks(uint32_t delay_ms)
 {
     TickType_t ticks = pdMS_TO_TICKS(delay_ms);
@@ -89,38 +84,19 @@ static TickType_t delay_ticks(uint32_t delay_ms)
 static void led_task(void *arg)
 {
     (void)arg;
-    const TickType_t led_active_ticks = delay_ticks(MEB_LED_ACTIVE_MS);
     const TickType_t led_period_ticks = delay_ticks(MEB_LED_PERIOD_MS);
-    const TickType_t led_off_ticks = led_period_ticks > led_active_ticks ? led_period_ticks - led_active_ticks : 1;
     rgb_t last_color = {0};
     bool has_last_color = false;
-    bool led_is_off = true;
 
     while (1) {
         meb_state_snapshot_t state;
         meb_state_get_snapshot(&state);
         rgb_t color = status_color(&state);
 
-        if (MEB_LED_SLEEP_OFF_ENABLED) {
+        if (!has_last_color || !colors_equal(color, last_color)) {
             ESP_ERROR_CHECK(show_color(color));
             last_color = color;
             has_last_color = true;
-            led_is_off = false;
-
-            vTaskDelay(led_active_ticks);
-
-            ESP_ERROR_CHECK(turn_led_off());
-            led_is_off = true;
-
-            vTaskDelay(led_off_ticks);
-            continue;
-        }
-
-        if (!has_last_color || !colors_equal(color, last_color) || led_is_off) {
-            ESP_ERROR_CHECK(show_color(color));
-            last_color = color;
-            has_last_color = true;
-            led_is_off = false;
         }
 
         vTaskDelay(led_period_ticks);

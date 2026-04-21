@@ -1,6 +1,8 @@
 #include "power_management.h"
 #include "app_config.h"
 
+#include <stdbool.h>
+
 #include "driver/gpio.h"
 #include "esp_check.h"
 #include "esp_cpu.h"
@@ -11,13 +13,19 @@
 #include "freertos/task.h"
 #include "sdkconfig.h"
 
+#define MEB_PM_LIGHT_SLEEP_RUNTIME_ENABLED \
+    (CONFIG_PM_ENABLE && CONFIG_FREERTOS_USE_TICKLESS_IDLE && MEB_PM_AUTOMATIC_LIGHT_SLEEP_ENABLED)
+
 #define DEBUG_PM_TASK_STACK_SIZE 3072
 #define DEBUG_PM_TASK_PRIORITY 2
 
 static const char *TAG = "power";
+#if MEB_PM_LIGHT_SLEEP_RUNTIME_ENABLED
 static esp_pm_lock_handle_t s_debug_pm_lock;
-static bool s_debug_pm_lock_held;
+static volatile bool s_debug_pm_lock_held;
+#endif
 
+#if MEB_PM_LIGHT_SLEEP_RUNTIME_ENABLED
 static esp_err_t keep_gpio_active_in_light_sleep(gpio_num_t gpio_num)
 {
     if (gpio_num == GPIO_NUM_NC) {
@@ -54,7 +62,9 @@ static esp_err_t set_debug_pm_lock(bool hold)
 
     return err;
 }
+#endif
 
+#if MEB_PM_LIGHT_SLEEP_RUNTIME_ENABLED
 static void debug_pm_task(void *arg)
 {
     const int64_t grace_until_us = esp_timer_get_time() + ((int64_t)MEB_PM_JTAG_BOOT_GRACE_MS * 1000);
@@ -94,6 +104,7 @@ static esp_err_t start_debug_pm_monitor(void)
     ESP_LOGI(TAG, "automatic light sleep held for %d ms to allow JTAG attach", MEB_PM_JTAG_BOOT_GRACE_MS);
     return ESP_OK;
 }
+#endif
 
 esp_err_t meb_power_management_init(void)
 {
@@ -101,7 +112,7 @@ esp_err_t meb_power_management_init(void)
     const esp_pm_config_t pm_config = {
         .max_freq_mhz = MEB_PM_MAX_CPU_FREQ_MHZ,
         .min_freq_mhz = MEB_PM_MIN_CPU_FREQ_MHZ,
-#if CONFIG_FREERTOS_USE_TICKLESS_IDLE
+#if MEB_PM_LIGHT_SLEEP_RUNTIME_ENABLED
         .light_sleep_enable = true,
 #else
         .light_sleep_enable = false,
@@ -109,12 +120,14 @@ esp_err_t meb_power_management_init(void)
     };
 
     ESP_RETURN_ON_ERROR(esp_pm_configure(&pm_config), TAG, "failed to configure power management");
+#if MEB_PM_LIGHT_SLEEP_RUNTIME_ENABLED
     ESP_RETURN_ON_ERROR(configure_light_sleep_gpio_behavior(), TAG, "failed to configure light sleep GPIO behavior");
     ESP_RETURN_ON_ERROR(start_debug_pm_monitor(), TAG, "failed to start debug PM monitor");
+#endif
     ESP_LOGI(TAG, "power management enabled: CPU %d-%d MHz, automatic light sleep %s, BLE sleep %s",
              MEB_PM_MIN_CPU_FREQ_MHZ,
              MEB_PM_MAX_CPU_FREQ_MHZ,
-#if CONFIG_FREERTOS_USE_TICKLESS_IDLE
+#if MEB_PM_LIGHT_SLEEP_RUNTIME_ENABLED
              "enabled",
 #else
              "disabled",

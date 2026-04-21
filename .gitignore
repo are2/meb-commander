@@ -1,5 +1,7 @@
 # ESP-IDF build output
 build/
+build-production/
+sdkconfig.production
 sdkconfig.old
 
 # ESP-IDF component manager generated dependencies

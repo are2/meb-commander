@@ -23,6 +23,6 @@ void app_main(void)
     ESP_ERROR_CHECK(meb_can_start_test_tx());
     ESP_ERROR_CHECK(meb_control_start());
 
-    ESP_LOGI(TAG, "MEB preheat controller running");
+    ESP_LOGI(TAG, "MEB preheat controller running (%s build)", MEB_BUILD_MODE);
     meb_serial_printf("{\"v\":%d,\"type\":\"device.ready\",\"version\":\"%s\"}\n", MEB_PREHEATER_PROTOCOL_VERSION, MEB_APP_VERSION);
 }

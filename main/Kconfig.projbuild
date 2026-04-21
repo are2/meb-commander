@@ -1,0 +1,31 @@
+menu "MEB Preheat"
+
+    config MEB_PRODUCTION_BUILD
+        bool "Production mode build"
+        default n
+        help
+            Enables production-oriented firmware settings. Development builds
+            should leave this disabled so USB-JTAG flashing/debugging remains
+            reliable.
+
+    config MEB_AUTOMATIC_LIGHT_SLEEP
+        bool "Enable automatic light sleep"
+        depends on PM_ENABLE && FREERTOS_USE_TICKLESS_IDLE
+        default y if MEB_PRODUCTION_BUILD
+        default n
+        help
+            Allows ESP-IDF power management to enter automatic light sleep
+            while the system is idle. This saves power, but can make USB-JTAG
+            flashing/debugging unreliable on ESP32-C5.
+
+    config MEB_JTAG_BOOT_GRACE_MS
+        int "Development JTAG no-light-sleep boot grace period"
+        default 0 if MEB_PRODUCTION_BUILD
+        default 30000
+        range 0 300000
+        help
+            Time after boot to hold an ESP_PM_NO_LIGHT_SLEEP lock when
+            automatic light sleep is enabled. Production builds default to
+            zero so low-power behavior starts immediately.
+
+endmenu
