@@ -28,4 +28,21 @@ menu "MEB Preheat"
             automatic light sleep is enabled. Production builds default to
             zero so low-power behavior starts immediately.
 
+    config MEB_DISABLE_SAFETY_AUTO_OFF
+        bool "Disable heating safety auto-off"
+        default n
+        help
+            Disables the hard heating auto-off limit. Leave this disabled for
+            the default safety behavior, which turns heating off after the
+            configured safety duration even when no user timer is set.
+
+    config MEB_SAFETY_AUTO_OFF_MINUTES
+        int "Heating safety auto-off limit in minutes"
+        depends on !MEB_DISABLE_SAFETY_AUTO_OFF
+        default 180
+        range 1 1440
+        help
+            Maximum time heating may stay enabled after a user enables it.
+            The default is 180 minutes, or 3 hours.
+
 endmenu

@@ -120,6 +120,9 @@ async def run_once(meb: MebBleClient, args: argparse.Namespace) -> bool:
     if args.interval_ms is not None:
         print(json.dumps(await meb.rpc("telemetry.set_interval", {"ms": args.interval_ms}), indent=2))
         return True
+    if args.auto_off_minutes is not None:
+        print(json.dumps(await meb.rpc("heating.set_auto_off_timer", {"minutes": args.auto_off_minutes}), indent=2))
+        return True
     if args.raw:
         payload = args.raw.strip()
         if not payload.endswith("\n"):
@@ -131,7 +134,7 @@ async def run_once(meb: MebBleClient, args: argparse.Namespace) -> bool:
 
 
 async def interactive(meb: MebBleClient) -> None:
-    print("Connected. Commands: enable, disable, get, info, interval <ms>, raw <json>, quit")
+    print("Connected. Commands: enable, disable, get, info, interval <ms>, timer <minutes|off>, raw <json>, quit")
 
     while True:
         line = await asyncio.to_thread(input, "meb> ")
@@ -152,6 +155,10 @@ async def interactive(meb: MebBleClient) -> None:
                 response = await meb.rpc("device.info")
             elif line.startswith("interval "):
                 response = await meb.rpc("telemetry.set_interval", {"ms": int(line.split(maxsplit=1)[1])})
+            elif line.startswith("timer "):
+                value = line.split(maxsplit=1)[1].strip().lower()
+                minutes = 0 if value in {"off", "disable", "disabled"} else int(value)
+                response = await meb.rpc("heating.set_auto_off_timer", {"minutes": minutes})
             elif line.startswith("raw "):
                 payload = line[4:].strip()
                 if not payload.endswith("\n"):
@@ -172,7 +179,15 @@ async def main_async(args: argparse.Namespace) -> None:
 
     try:
         meb = MebBleClient(client, show_events=args.watch or not any(
-            [args.enable, args.disable, args.get, args.info, args.interval_ms is not None, args.raw]
+            [
+                args.enable,
+                args.disable,
+                args.get,
+                args.info,
+                args.interval_ms is not None,
+                args.auto_off_minutes is not None,
+                args.raw,
+            ]
         ))
         await meb.start()
 
@@ -201,6 +216,13 @@ def parse_args() -> argparse.Namespace:
     actions.add_argument("--get", action="store_true", help="Read heating state")
     actions.add_argument("--info", action="store_true", help="Read device information")
     actions.add_argument("--interval-ms", type=int, help="Set telemetry interval")
+    actions.add_argument(
+        "--auto-off-minutes",
+        "--timer-minutes",
+        dest="auto_off_minutes",
+        type=int,
+        help="Set heating auto-off timer in minutes; 0 disables the user timer",
+    )
     actions.add_argument("--raw", help="Send one raw newline-delimited JSON object")
 
     parser.add_argument("--raw-wait", type=float, default=1.0, help="Seconds to listen after --raw")

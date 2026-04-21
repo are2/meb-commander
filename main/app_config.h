@@ -54,6 +54,19 @@
 #define MEB_TELEMETRY_MAX_PERIOD_MS 60000
 #define MEB_LED_PERIOD_MS 500
 
+// Heating auto-off. A user timer of 0 minutes disables the user-configured
+// timer, while the safety limit remains active unless disabled in Kconfig.
+#ifdef CONFIG_MEB_DISABLE_SAFETY_AUTO_OFF
+#define MEB_SAFETY_AUTO_OFF_ENABLED 0
+#else
+#define MEB_SAFETY_AUTO_OFF_ENABLED 1
+#endif
+
+#ifndef CONFIG_MEB_SAFETY_AUTO_OFF_MINUTES
+#define CONFIG_MEB_SAFETY_AUTO_OFF_MINUTES 180
+#endif
+#define MEB_SAFETY_AUTO_OFF_MINUTES CONFIG_MEB_SAFETY_AUTO_OFF_MINUTES
+
 // Temporary bench-test CAN transmitter. Set to 0 before connecting to a real car.
 #define MEB_CAN_TEST_TX_ENABLED 0
 #define MEB_CAN_TEST_TX_ID 0x12345678U

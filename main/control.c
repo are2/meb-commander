@@ -4,6 +4,9 @@
 #include "can_bus.h"
 #include "serial_console.h"
 
+#include <inttypes.h>
+#include <stdio.h>
+
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -48,6 +51,13 @@ static void control_task(void *arg)
     vTaskDelay(pdMS_TO_TICKS(MEB_CONTROL_INITIAL_DELAY_MS));
 
     while (1) {
+        meb_heating_auto_off_reason_t auto_off_reason = meb_state_apply_auto_off();
+        if (auto_off_reason != MEB_HEATING_AUTO_OFF_NONE) {
+            meb_serial_printf("{\"v\":%d,\"type\":\"control.heating_auto_off\",\"reason\":\"%s\"}\n",
+                              MEB_PREHEATER_PROTOCOL_VERSION,
+                              auto_off_reason == MEB_HEATING_AUTO_OFF_TIMER ? "timer" : "safety");
+        }
+
         meb_state_snapshot_t state;
         meb_state_get_snapshot(&state);
 
@@ -72,6 +82,13 @@ static void telemetry_task(void *arg)
         uint32_t interval_ms = meb_control_get_telemetry_interval_ms();
         meb_state_snapshot_t state;
         meb_state_get_snapshot(&state);
+        char remaining_minutes[16];
+
+        if (state.auto_off_remaining_valid) {
+            snprintf(remaining_minutes, sizeof(remaining_minutes), "%" PRIu32, state.auto_off_remaining_minutes);
+        } else {
+            snprintf(remaining_minutes, sizeof(remaining_minutes), "null");
+        }
 
         meb_serial_printf("{"
                           "\"v\":%d,"
@@ -96,7 +113,9 @@ static void telemetry_task(void *arg)
                               "\"max\":%.1f"
                           "},"
                           "\"control\":{"
-                              "\"heating_enabled\":%s"
+                              "\"heating_enabled\":%s,"
+                              "\"auto_off_timer_minutes\":%" PRIu32 ","
+                              "\"auto_off_remaining_minutes\":%s"
                           "}"
                           "}\n",
                           MEB_PREHEATER_PROTOCOL_VERSION,
@@ -111,7 +130,9 @@ static void telemetry_task(void *arg)
                           state.max_charge_current_amp,
                           state.battery_min_temp,
                           state.battery_max_temp,
-                          state.heating_enabled ? "true" : "false");
+                          state.heating_enabled ? "true" : "false",
+                          state.auto_off_timer_minutes,
+                          remaining_minutes);
 
         vTaskDelay(pdMS_TO_TICKS(interval_ms));
     }

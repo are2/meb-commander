@@ -2,11 +2,16 @@
 #include "app_config.h"
 
 #include <string.h>
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
 static meb_state_snapshot_t s_state;
 static SemaphoreHandle_t s_state_lock;
+static int64_t s_heating_enabled_since_us;
+static int64_t s_user_auto_off_deadline_us;
+
+#define US_PER_MINUTE (60LL * 1000LL * 1000LL)
 
 static void lock_state(void)
 {
@@ -22,6 +27,43 @@ static void unlock_state(void)
     }
 }
 
+static int64_t minutes_to_us(uint32_t minutes)
+{
+    return (int64_t)minutes * US_PER_MINUTE;
+}
+
+static uint32_t remaining_minutes_ceil(int64_t remaining_us)
+{
+    if (remaining_us <= 0) {
+        return 0;
+    }
+
+    return (uint32_t)((remaining_us + US_PER_MINUTE - 1) / US_PER_MINUTE);
+}
+
+static int64_t safety_auto_off_deadline_locked(void)
+{
+#if MEB_SAFETY_AUTO_OFF_ENABLED
+    if (s_heating_enabled_since_us > 0 && MEB_SAFETY_AUTO_OFF_MINUTES > 0) {
+        return s_heating_enabled_since_us + minutes_to_us(MEB_SAFETY_AUTO_OFF_MINUTES);
+    }
+#endif
+
+    return 0;
+}
+
+static int64_t effective_auto_off_deadline_locked(void)
+{
+    int64_t deadline_us = s_user_auto_off_deadline_us;
+    int64_t safety_deadline_us = safety_auto_off_deadline_locked();
+
+    if (safety_deadline_us > 0 && (deadline_us == 0 || safety_deadline_us < deadline_us)) {
+        deadline_us = safety_deadline_us;
+    }
+
+    return deadline_us;
+}
+
 esp_err_t meb_state_init(void)
 {
     s_state_lock = xSemaphoreCreateMutex();
@@ -31,6 +73,8 @@ esp_err_t meb_state_init(void)
 
     memset(&s_state, 0, sizeof(s_state));
     s_state.heating_enabled = false;
+    s_heating_enabled_since_us = 0;
+    s_user_auto_off_deadline_us = 0;
     return ESP_OK;
 }
 
@@ -42,12 +86,34 @@ void meb_state_get_snapshot(meb_state_snapshot_t *snapshot)
 
     lock_state();
     *snapshot = s_state;
+    snapshot->auto_off_timer_enabled = s_state.auto_off_timer_minutes > 0;
+    snapshot->auto_off_remaining_valid = false;
+    snapshot->auto_off_remaining_minutes = 0;
+
+    int64_t deadline_us = effective_auto_off_deadline_locked();
+    if (s_state.heating_enabled && deadline_us > 0) {
+        int64_t remaining_us = deadline_us - esp_timer_get_time();
+        snapshot->auto_off_remaining_valid = true;
+        snapshot->auto_off_remaining_minutes = remaining_minutes_ceil(remaining_us);
+    }
     unlock_state();
 }
 
 void meb_state_set_heating_enabled(bool enabled)
 {
     lock_state();
+    if (enabled) {
+        if (!s_state.heating_enabled) {
+            int64_t now_us = esp_timer_get_time();
+            s_heating_enabled_since_us = now_us;
+            s_user_auto_off_deadline_us = s_state.auto_off_timer_minutes > 0
+                ? now_us + minutes_to_us(s_state.auto_off_timer_minutes)
+                : 0;
+        }
+    } else {
+        s_heating_enabled_since_us = 0;
+        s_user_auto_off_deadline_us = 0;
+    }
     s_state.heating_enabled = enabled;
     unlock_state();
 }
@@ -61,6 +127,54 @@ bool meb_state_is_heating_enabled(void)
     unlock_state();
 
     return enabled;
+}
+
+esp_err_t meb_state_set_auto_off_timer_minutes(uint32_t minutes)
+{
+    lock_state();
+    s_state.auto_off_timer_minutes = minutes;
+    if (s_state.heating_enabled) {
+        s_user_auto_off_deadline_us = minutes > 0
+            ? esp_timer_get_time() + minutes_to_us(minutes)
+            : 0;
+    } else {
+        s_user_auto_off_deadline_us = 0;
+    }
+    unlock_state();
+
+    return ESP_OK;
+}
+
+meb_heating_auto_off_reason_t meb_state_apply_auto_off(void)
+{
+    meb_heating_auto_off_reason_t reason = MEB_HEATING_AUTO_OFF_NONE;
+    int64_t now_us = esp_timer_get_time();
+
+    lock_state();
+    if (s_state.heating_enabled) {
+        int64_t user_deadline_us = s_user_auto_off_deadline_us;
+        int64_t safety_deadline_us = safety_auto_off_deadline_locked();
+        int64_t deadline_us = user_deadline_us;
+
+        if (safety_deadline_us > 0 && (deadline_us == 0 || safety_deadline_us < deadline_us)) {
+            deadline_us = safety_deadline_us;
+        }
+
+        if (deadline_us > 0 && now_us >= deadline_us) {
+            if (user_deadline_us > 0 && user_deadline_us <= deadline_us) {
+                reason = MEB_HEATING_AUTO_OFF_TIMER;
+            } else {
+                reason = MEB_HEATING_AUTO_OFF_SAFETY;
+            }
+
+            s_state.heating_enabled = false;
+            s_heating_enabled_since_us = 0;
+            s_user_auto_off_deadline_us = 0;
+        }
+    }
+    unlock_state();
+
+    return reason;
 }
 
 bool meb_state_take_session_error(void)

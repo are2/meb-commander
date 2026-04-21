@@ -265,6 +265,39 @@ static void send_rpc_result(bool has_id, const char *id_token, const char *resul
     meb_serial_printf("{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":%s}\n", id_token, result);
 }
 
+static void format_auto_off_remaining(const meb_state_snapshot_t *state, char *buf, size_t buf_len)
+{
+    if (state->auto_off_remaining_valid) {
+        snprintf(buf, buf_len, "%" PRIu32, state->auto_off_remaining_minutes);
+    } else {
+        snprintf(buf, buf_len, "null");
+    }
+}
+
+static void send_heating_state_result(bool has_id, const char *id_token)
+{
+    meb_state_snapshot_t state;
+    meb_state_get_snapshot(&state);
+    char remaining_minutes[16];
+    format_auto_off_remaining(&state, remaining_minutes, sizeof(remaining_minutes));
+
+    send_rpc_result(has_id, id_token,
+                    "{\"heating_enabled\":%s,\"active\":%u,\"request\":%u,\"cooling_request\":%u,"
+                    "\"power_w\":%u,\"power_req_w\":%u,\"temperature_status\":%u,"
+                    "\"auto_off_timer_enabled\":%s,\"auto_off_timer_minutes\":%" PRIu32 ","
+                    "\"auto_off_remaining_minutes\":%s}",
+                    state.heating_enabled ? "true" : "false",
+                    state.battery_heating_active,
+                    state.heating_request,
+                    state.cooling_request,
+                    state.power_battery_heating_watt,
+                    state.power_battery_heating_req_watt,
+                    state.temperature_status_charge,
+                    state.auto_off_timer_enabled ? "true" : "false",
+                    state.auto_off_timer_minutes,
+                    remaining_minutes);
+}
+
 static void handle_heating_set(bool has_id, const char *id_token, const char *cmd)
 {
     bool enabled = false;
@@ -276,24 +309,31 @@ static void handle_heating_set(bool has_id, const char *id_token, const char *cm
     }
 
     meb_state_set_heating_enabled(enabled);
-    send_rpc_result(has_id, id_token, "{\"heating_enabled\":%s}", enabled ? "true" : "false");
+    send_heating_state_result(has_id, id_token);
 }
 
 static void handle_heating_get(bool has_id, const char *id_token)
 {
-    meb_state_snapshot_t state;
-    meb_state_get_snapshot(&state);
+    send_heating_state_result(has_id, id_token);
+}
 
-    send_rpc_result(has_id, id_token,
-                    "{\"heating_enabled\":%s,\"active\":%u,\"request\":%u,\"cooling_request\":%u,"
-                    "\"power_w\":%u,\"power_req_w\":%u,\"temperature_status\":%u}",
-                    state.heating_enabled ? "true" : "false",
-                    state.battery_heating_active,
-                    state.heating_request,
-                    state.cooling_request,
-                    state.power_battery_heating_watt,
-                    state.power_battery_heating_req_watt,
-                    state.temperature_status_charge);
+static void handle_heating_set_auto_off_timer(bool has_id, const char *id_token, const char *cmd)
+{
+    uint32_t minutes = 0;
+    const char *params = find_key_value(cmd, "params");
+
+    if (!params || *params != '{' || !parse_uint_value(find_key_value(params, "minutes"), &minutes)) {
+        send_rpc_error(id_token, JSONRPC_INVALID_PARAMS, "Expected params.minutes integer; 0 disables timer");
+        return;
+    }
+
+    esp_err_t err = meb_state_set_auto_off_timer_minutes(minutes);
+    if (err != ESP_OK) {
+        send_rpc_error(id_token, JSONRPC_INVALID_PARAMS, "params.minutes outside allowed range");
+        return;
+    }
+
+    send_heating_state_result(has_id, id_token);
 }
 
 static void handle_device_info(bool has_id, const char *id_token)
@@ -302,7 +342,9 @@ static void handle_device_info(bool has_id, const char *id_token)
                     "{\"version\":\"%s\",\"about\":\"%s\",\"protocol_version\":%d,"
                     "\"serial\":{\"uart\":0,\"baud_rate\":%d,\"tx_gpio\":%d,\"rx_gpio\":%d},"
                     "\"ble\":{\"name\":\"%s\",\"service_uuid\":\"%s\",\"rx_uuid\":\"%s\",\"tx_uuid\":\"%s\"},"
-                    "\"telemetry_interval_ms\":%u,\"can\":{\"tx_gpio\":%d,\"rx_gpio\":%d,"
+                    "\"telemetry_interval_ms\":%u,"
+                    "\"heating\":{\"safety_auto_off_enabled\":%s,\"safety_auto_off_minutes\":%d},"
+                    "\"can\":{\"tx_gpio\":%d,\"rx_gpio\":%d,"
                     "\"bitrate\":%d,\"data_bitrate\":%d}}",
                     MEB_APP_VERSION,
                     MEB_APP_ABOUT,
@@ -315,6 +357,8 @@ static void handle_device_info(bool has_id, const char *id_token)
                     MEB_BLE_RX_UUID,
                     MEB_BLE_TX_UUID,
                     meb_control_get_telemetry_interval_ms(),
+                    MEB_SAFETY_AUTO_OFF_ENABLED ? "true" : "false",
+                    (int)MEB_SAFETY_AUTO_OFF_MINUTES,
                     MEB_TWAI_TX_GPIO,
                     MEB_TWAI_RX_GPIO,
                     MEB_TWAI_BITRATE,
@@ -504,6 +548,8 @@ void meb_serial_console_process_command(const char *cmd)
         handle_heating_set(has_id, id_token, cmd);
     } else if (strcmp(method, "heating.get") == 0) {
         handle_heating_get(has_id, id_token);
+    } else if (strcmp(method, "heating.set_auto_off_timer") == 0) {
+        handle_heating_set_auto_off_timer(has_id, id_token, cmd);
     } else if (strcmp(method, "device.info") == 0) {
         handle_device_info(has_id, id_token);
     } else if (strcmp(method, "telemetry.set_interval") == 0) {

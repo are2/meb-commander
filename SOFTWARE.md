@@ -130,15 +130,17 @@ Supported methods:
 {"jsonrpc":"2.0","id":2,"method":"heating.get"}
 {"jsonrpc":"2.0","id":3,"method":"device.info"}
 {"jsonrpc":"2.0","id":4,"method":"telemetry.set_interval","params":{"ms":1000}}
-{"jsonrpc":"2.0","id":5,"method":"firmware.status"}
+{"jsonrpc":"2.0","id":5,"method":"heating.set_auto_off_timer","params":{"minutes":30}}
+{"jsonrpc":"2.0","id":6,"method":"firmware.status"}
 ```
 
 JSON-RPC success response examples:
 
 ```json
-{"jsonrpc":"2.0","id":1,"result":{"heating_enabled":true}}
-{"jsonrpc":"2.0","id":2,"result":{"heating_enabled":true,"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0,"temperature_status":1}}
+{"jsonrpc":"2.0","id":1,"result":{"heating_enabled":true,"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0,"temperature_status":1,"auto_off_timer_enabled":false,"auto_off_timer_minutes":0,"auto_off_remaining_minutes":180}}
+{"jsonrpc":"2.0","id":2,"result":{"heating_enabled":true,"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0,"temperature_status":1,"auto_off_timer_enabled":false,"auto_off_timer_minutes":0,"auto_off_remaining_minutes":180}}
 {"jsonrpc":"2.0","id":4,"result":{"interval_ms":1000}}
+{"jsonrpc":"2.0","id":5,"result":{"heating_enabled":true,"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0,"temperature_status":1,"auto_off_timer_enabled":true,"auto_off_timer_minutes":30,"auto_off_remaining_minutes":30}}
 ```
 
 JSON-RPC error response example:
@@ -148,6 +150,8 @@ JSON-RPC error response example:
 ```
 
 `telemetry.set_interval` accepts `params.ms` from `100` to `60000`.
+
+`heating.set_auto_off_timer` accepts `params.minutes`. A value greater than zero starts that many minutes of user auto-off countdown whenever heating is enabled; setting `minutes` to `0` disables the user timer. The safety auto-off limit still turns heating off after 180 minutes by default even when the user timer is disabled. Build config `MEB_DISABLE_SAFETY_AUTO_OFF` disables that safety limit, and `MEB_SAFETY_AUTO_OFF_MINUTES` changes the default 3 hour duration.
 
 ## Firmware Update Protocol
 
@@ -234,6 +238,8 @@ The helper client uses Python Bleak:
 python -m pip install bleak
 python scripts\meb_ble_client.py --info
 python scripts\meb_ble_client.py --enable --watch
+python scripts\meb_ble_client.py --auto-off-minutes 30
+python scripts\meb_ble_client.py --auto-off-minutes 0
 python scripts\meb_ble_client.py --disable
 ```
 
@@ -242,14 +248,15 @@ The firmware also emits versioned NDJSON events. These are not JSON-RPC response
 Telemetry event:
 
 ```json
-{"v":1,"type":"telemetry","ts_ms":123456,"heating":{"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0},"thermal":{"status":0},"predicted":{"power_kw":0.0,"current_a":0.0},"battery_temp_c":{"min":0.0,"max":0.0},"control":{"heating_enabled":false}}
+{"v":2,"type":"telemetry","ts_ms":123456,"heating":{"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0},"thermal":{"status":0},"predicted":{"power_kw":0.0,"current_a":0.0},"battery_temp_c":{"min":0.0,"max":0.0},"control":{"heating_enabled":false,"auto_off_timer_minutes":0,"auto_off_remaining_minutes":null}}
 ```
 
 Other events:
 
 ```json
-{"v":1,"type":"device.ready","version":"0.3.0"}
-{"v":1,"type":"control.diag_session_retry"}
+{"v":2,"type":"device.ready","version":"0.3.0"}
+{"v":2,"type":"control.diag_session_retry"}
+{"v":2,"type":"control.heating_auto_off","reason":"safety"}
 ```
 
 ## Pins
