@@ -340,6 +340,7 @@ static void handle_device_info(bool has_id, const char *id_token)
 {
     send_rpc_result(has_id, id_token,
                     "{\"version\":\"%s\",\"about\":\"%s\",\"protocol_version\":%d,"
+                    "\"release_build\":%s,\"build_mode\":\"%s\","
                     "\"serial\":{\"uart\":0,\"baud_rate\":%d,\"tx_gpio\":%d,\"rx_gpio\":%d},"
                     "\"ble\":{\"name\":\"%s\",\"service_uuid\":\"%s\",\"rx_uuid\":\"%s\",\"tx_uuid\":\"%s\"},"
                     "\"telemetry_interval_ms\":%u,"
@@ -349,6 +350,8 @@ static void handle_device_info(bool has_id, const char *id_token)
                     MEB_APP_VERSION,
                     MEB_APP_ABOUT,
                     MEB_PREHEATER_PROTOCOL_VERSION,
+                    MEB_RELEASE_BUILD ? "true" : "false",
+                    MEB_BUILD_MODE,
                     MEB_HOST_UART_BAUD_RATE,
                     MEB_HOST_UART_TX_GPIO,
                     MEB_HOST_UART_RX_GPIO,

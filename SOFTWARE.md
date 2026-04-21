@@ -139,6 +139,7 @@ JSON-RPC success response examples:
 ```json
 {"jsonrpc":"2.0","id":1,"result":{"heating_enabled":true,"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0,"temperature_status":1,"auto_off_timer_enabled":false,"auto_off_timer_minutes":0,"auto_off_remaining_minutes":180}}
 {"jsonrpc":"2.0","id":2,"result":{"heating_enabled":true,"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0,"temperature_status":1,"auto_off_timer_enabled":false,"auto_off_timer_minutes":0,"auto_off_remaining_minutes":180}}
+{"jsonrpc":"2.0","id":3,"result":{"version":"0.4.0","about":"MEB preheat CAN controller","protocol_version":2,"release_build":false,"build_mode":"development","serial":{"uart":0,"baud_rate":115200,"tx_gpio":11,"rx_gpio":12},"ble":{"name":"MEB-Preheat","service_uuid":"7e57c000-f8aa-4a1f-9af3-9c0b7fd90e00","rx_uuid":"7e57c001-f8aa-4a1f-9af3-9c0b7fd90e00","tx_uuid":"7e57c002-f8aa-4a1f-9af3-9c0b7fd90e00"},"telemetry_interval_ms":1000,"heating":{"safety_auto_off_enabled":true,"safety_auto_off_minutes":180},"can":{"tx_gpio":4,"rx_gpio":5,"bitrate":500000,"data_bitrate":2000000}}}
 {"jsonrpc":"2.0","id":4,"result":{"interval_ms":1000}}
 {"jsonrpc":"2.0","id":5,"result":{"heating_enabled":true,"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0,"temperature_status":1,"auto_off_timer_enabled":true,"auto_off_timer_minutes":30,"auto_off_remaining_minutes":30}}
 ```
