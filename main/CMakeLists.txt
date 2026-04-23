@@ -4,6 +4,7 @@ idf_component_register(
         "ble_console.c"
         "can_bus.c"
         "control.c"
+        "diagnostics.c"
         "meb-preheat.c"
         "ota_update.c"
         "power_management.c"
@@ -18,6 +19,7 @@ idf_component_register(
         esp_pm
         esp_system
         esp_timer
+        heap
         bt
         nvs_flash
         espressif__led_strip

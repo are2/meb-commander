@@ -117,6 +117,20 @@ async def run_once(meb: MebBleClient, args: argparse.Namespace) -> bool:
     if args.info:
         print(json.dumps(await meb.rpc("device.info"), indent=2))
         return True
+    if args.uptime:
+        print(json.dumps(await meb.rpc("device.uptime"), indent=2))
+        return True
+    if args.reset:
+        print(json.dumps(await meb.rpc("device.reset"), indent=2))
+        return True
+    if args.diagnostics:
+        params = {"limit": args.event_limit} if args.event_limit is not None else None
+        print(json.dumps(await meb.rpc("device.diagnostics", params), indent=2))
+        return True
+    if args.events:
+        params = {"limit": args.event_limit} if args.event_limit is not None else None
+        print(json.dumps(await meb.rpc("device.events", params), indent=2))
+        return True
     if args.interval_ms is not None:
         print(json.dumps(await meb.rpc("telemetry.set_interval", {"ms": args.interval_ms}), indent=2))
         return True
@@ -134,7 +148,7 @@ async def run_once(meb: MebBleClient, args: argparse.Namespace) -> bool:
 
 
 async def interactive(meb: MebBleClient) -> None:
-    print("Connected. Commands: enable, disable, get, info, interval <ms>, timer <minutes|off>, raw <json>, quit")
+    print("Connected. Commands: enable, disable, get, info, uptime, reset, diag, events [limit], interval <ms>, timer <minutes|off>, raw <json>, quit")
 
     while True:
         line = await asyncio.to_thread(input, "meb> ")
@@ -153,6 +167,16 @@ async def interactive(meb: MebBleClient) -> None:
                 response = await meb.rpc("heating.get")
             elif line == "info":
                 response = await meb.rpc("device.info")
+            elif line == "uptime":
+                response = await meb.rpc("device.uptime")
+            elif line == "reset":
+                response = await meb.rpc("device.reset")
+            elif line == "diag":
+                response = await meb.rpc("device.diagnostics")
+            elif line.startswith("events"):
+                parts = line.split(maxsplit=1)
+                params = {"limit": int(parts[1])} if len(parts) > 1 else None
+                response = await meb.rpc("device.events", params)
             elif line.startswith("interval "):
                 response = await meb.rpc("telemetry.set_interval", {"ms": int(line.split(maxsplit=1)[1])})
             elif line.startswith("timer "):
@@ -184,6 +208,10 @@ async def main_async(args: argparse.Namespace) -> None:
                 args.disable,
                 args.get,
                 args.info,
+                args.uptime,
+                args.reset,
+                args.diagnostics,
+                args.events,
                 args.interval_ms is not None,
                 args.auto_off_minutes is not None,
                 args.raw,
@@ -215,6 +243,10 @@ def parse_args() -> argparse.Namespace:
     actions.add_argument("--disable", action="store_true", help="Disable heating request")
     actions.add_argument("--get", action="store_true", help="Read heating state")
     actions.add_argument("--info", action="store_true", help="Read device information")
+    actions.add_argument("--uptime", action="store_true", help="Read uptime and last reset reason")
+    actions.add_argument("--reset", action="store_true", help="Reset the device")
+    actions.add_argument("--diagnostics", action="store_true", help="Read uptime, heap stats, and recent firmware events")
+    actions.add_argument("--events", action="store_true", help="Read recent firmware diagnostic events")
     actions.add_argument("--interval-ms", type=int, help="Set telemetry interval")
     actions.add_argument(
         "--auto-off-minutes",
@@ -225,6 +257,7 @@ def parse_args() -> argparse.Namespace:
     )
     actions.add_argument("--raw", help="Send one raw newline-delimited JSON object")
 
+    parser.add_argument("--event-limit", type=int, help="Number of recent diagnostic events to include")
     parser.add_argument("--raw-wait", type=float, default=1.0, help="Seconds to listen after --raw")
     return parser.parse_args()
 

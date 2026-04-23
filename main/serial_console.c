@@ -3,6 +3,7 @@
 #include "app_state.h"
 #include "ble_console.h"
 #include "control.h"
+#include "diagnostics.h"
 #include "ota_update.h"
 
 #include <stdarg.h>
@@ -25,6 +26,12 @@
 #define HOST_TASK_PRIORITY 5
 #define JSONRPC_ID_BUF_SIZE 64
 #define JSONRPC_METHOD_BUF_SIZE 48
+#define JSONRPC_RESULT_BUF_SIZE 1536
+#define SERIAL_OUTPUT_BUF_SIZE 2048
+#define DIAG_EVENTS_DEFAULT_LIMIT 8
+#define DIAG_EVENTS_DIAGNOSTICS_LIMIT 5
+#define DIAG_EVENTS_MAX_LIMIT 8
+#define DEVICE_RESET_DELAY_MS 500
 
 #define JSONRPC_PARSE_ERROR -32700
 #define JSONRPC_INVALID_REQUEST -32600
@@ -208,7 +215,7 @@ static bool parse_required_string_key(const char *json, const char *key, char *o
 
 void meb_serial_printf(const char *fmt, ...)
 {
-    char buf[1024];
+    char buf[SERIAL_OUTPUT_BUF_SIZE];
     va_list args;
 
     va_start(args, fmt);
@@ -246,7 +253,7 @@ static void send_rpc_result(bool has_id, const char *id_token, const char *resul
         return;
     }
 
-    char result[640];
+    char result[JSONRPC_RESULT_BUF_SIZE];
     va_list args;
 
     va_start(args, result_fmt);
@@ -334,6 +341,181 @@ static void handle_heating_set_auto_off_timer(bool has_id, const char *id_token,
     }
 
     send_heating_state_result(has_id, id_token);
+}
+
+static bool json_appendf(char *buf, size_t buf_len, size_t *pos, const char *fmt, ...)
+{
+    if (!buf || !pos || *pos >= buf_len) {
+        return false;
+    }
+
+    va_list args;
+    va_start(args, fmt);
+    int len = vsnprintf(buf + *pos, buf_len - *pos, fmt, args);
+    va_end(args);
+
+    if (len < 0 || (size_t)len >= buf_len - *pos) {
+        return false;
+    }
+
+    *pos += (size_t)len;
+    return true;
+}
+
+static bool parse_optional_limit(const char *cmd, uint32_t default_limit, uint32_t *limit)
+{
+    if (!limit) {
+        return false;
+    }
+
+    *limit = default_limit;
+    const char *params = find_key_value(cmd, "params");
+    if (!params) {
+        return true;
+    }
+    if (*params != '{') {
+        return false;
+    }
+
+    const char *limit_value = find_key_value(params, "limit");
+    if (!limit_value) {
+        return true;
+    }
+
+    return parse_uint_value(limit_value, limit);
+}
+
+static bool format_event_log_json(char *buf, size_t buf_len, uint32_t limit)
+{
+    meb_diag_event_snapshot_t snapshot;
+    meb_diag_get_events(&snapshot);
+
+    if (limit > DIAG_EVENTS_MAX_LIMIT) {
+        limit = DIAG_EVENTS_MAX_LIMIT;
+    }
+    if (limit > snapshot.count) {
+        limit = snapshot.count;
+    }
+
+    size_t pos = 0;
+    uint32_t start = snapshot.count > limit ? snapshot.count - limit : 0;
+
+    if (!json_appendf(buf, buf_len, &pos,
+                      "{\"capacity\":%" PRIu32 ",\"count\":%" PRIu32 ",\"returned\":%" PRIu32
+                      ",\"overwritten\":%" PRIu32 ",\"events\":[",
+                      snapshot.capacity,
+                      snapshot.count,
+                      limit,
+                      snapshot.overwritten)) {
+        return false;
+    }
+
+    for (uint32_t i = start; i < snapshot.count; i++) {
+        const meb_diag_event_t *event = &snapshot.events[i];
+        char component[(MEB_DIAG_COMPONENT_LEN * 2) + 1];
+        char name[(MEB_DIAG_EVENT_LEN * 2) + 1];
+        char detail[(MEB_DIAG_DETAIL_LEN * 2) + 1];
+
+        meb_diag_json_escape(event->component, component, sizeof(component));
+        meb_diag_json_escape(event->event, name, sizeof(name));
+        meb_diag_json_escape(event->detail, detail, sizeof(detail));
+
+        if (i > start && !json_appendf(buf, buf_len, &pos, ",")) {
+            return false;
+        }
+
+        if (!json_appendf(buf, buf_len, &pos,
+                          "{\"seq\":%" PRIu32 ",\"ts_ms\":%" PRIu64
+                          ",\"c\":\"%s\",\"e\":\"%s\",\"d\":\"%s\","
+                          "\"heap\":%" PRIu32 ",\"min_heap\":%" PRIu32 "}",
+                          event->seq,
+                          event->uptime_ms,
+                          component,
+                          name,
+                          detail,
+                          event->free_heap,
+                          event->minimum_free_heap)) {
+            return false;
+        }
+    }
+
+    return json_appendf(buf, buf_len, &pos, "]}");
+}
+
+static void handle_device_uptime(bool has_id, const char *id_token)
+{
+    meb_diag_status_t status;
+    meb_diag_get_status(&status);
+
+    send_rpc_result(has_id, id_token,
+                    "{\"uptime_ms\":%" PRIu64 ",\"reset\":{\"reason\":%d,\"name\":\"%s\"}}",
+                    status.uptime_ms,
+                    (int)status.reset_reason,
+                    meb_diag_reset_reason_name(status.reset_reason));
+}
+
+static void handle_device_reset(bool has_id, const char *id_token)
+{
+    esp_err_t err = meb_ota_update_schedule_reboot(DEVICE_RESET_DELAY_MS);
+    if (err != ESP_OK) {
+        send_rpc_error(id_token, JSONRPC_SERVER_ERROR, "Failed to schedule device reset");
+        return;
+    }
+
+    send_rpc_result(has_id, id_token, "{\"resetting\":true,\"delay_ms\":%u}", DEVICE_RESET_DELAY_MS);
+}
+
+static void handle_device_events(bool has_id, const char *id_token, const char *cmd)
+{
+    uint32_t limit = DIAG_EVENTS_DEFAULT_LIMIT;
+    if (!parse_optional_limit(cmd, DIAG_EVENTS_DEFAULT_LIMIT, &limit)) {
+        send_rpc_error(id_token, JSONRPC_INVALID_PARAMS, "Expected params.limit integer");
+        return;
+    }
+
+    char event_log[1200];
+    if (!format_event_log_json(event_log, sizeof(event_log), limit)) {
+        send_rpc_error(id_token, JSONRPC_SERVER_ERROR, "Diagnostics event response too large");
+        return;
+    }
+
+    send_rpc_result(has_id, id_token, "%s", event_log);
+}
+
+static void handle_device_diagnostics(bool has_id, const char *id_token, const char *cmd)
+{
+    uint32_t limit = DIAG_EVENTS_DIAGNOSTICS_LIMIT;
+    if (!parse_optional_limit(cmd, DIAG_EVENTS_DIAGNOSTICS_LIMIT, &limit)) {
+        send_rpc_error(id_token, JSONRPC_INVALID_PARAMS, "Expected params.limit integer");
+        return;
+    }
+    if (limit > DIAG_EVENTS_DIAGNOSTICS_LIMIT) {
+        limit = DIAG_EVENTS_DIAGNOSTICS_LIMIT;
+    }
+
+    meb_diag_status_t status;
+    meb_diag_get_status(&status);
+
+    char event_log[900];
+    if (!format_event_log_json(event_log, sizeof(event_log), limit)) {
+        send_rpc_error(id_token, JSONRPC_SERVER_ERROR, "Diagnostics event response too large");
+        return;
+    }
+
+    send_rpc_result(has_id, id_token,
+                    "{\"uptime_ms\":%" PRIu64 ",\"reset\":{\"reason\":%d,\"name\":\"%s\"},"
+                    "\"heap\":{\"free\":%" PRIu32 ",\"minimum_free\":%" PRIu32
+                    ",\"free_8bit\":%" PRIu32 ",\"minimum_free_8bit\":%" PRIu32
+                    ",\"largest_free_8bit_block\":%" PRIu32 "},\"event_log\":%s}",
+                    status.uptime_ms,
+                    (int)status.reset_reason,
+                    meb_diag_reset_reason_name(status.reset_reason),
+                    status.free_heap,
+                    status.minimum_free_heap,
+                    status.free_8bit_heap,
+                    status.minimum_free_8bit_heap,
+                    status.largest_free_8bit_block,
+                    event_log);
 }
 
 static void handle_device_info(bool has_id, const char *id_token)
@@ -555,6 +737,14 @@ void meb_serial_console_process_command(const char *cmd)
         handle_heating_set_auto_off_timer(has_id, id_token, cmd);
     } else if (strcmp(method, "device.info") == 0) {
         handle_device_info(has_id, id_token);
+    } else if (strcmp(method, "device.uptime") == 0) {
+        handle_device_uptime(has_id, id_token);
+    } else if (strcmp(method, "device.reset") == 0) {
+        handle_device_reset(has_id, id_token);
+    } else if (strcmp(method, "device.diagnostics") == 0) {
+        handle_device_diagnostics(has_id, id_token, cmd);
+    } else if (strcmp(method, "device.events") == 0) {
+        handle_device_events(has_id, id_token, cmd);
     } else if (strcmp(method, "telemetry.set_interval") == 0) {
         handle_telemetry_set_interval(has_id, id_token, cmd);
     } else if (strcmp(method, "firmware.begin") == 0) {

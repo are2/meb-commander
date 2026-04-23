@@ -2,6 +2,7 @@
 #include "app_config.h"
 #include "app_state.h"
 #include "can_bus.h"
+#include "diagnostics.h"
 #include "serial_console.h"
 
 #include <inttypes.h>
@@ -42,6 +43,7 @@ esp_err_t meb_control_set_telemetry_interval_ms(uint32_t interval_ms)
     s_telemetry_interval_ms = interval_ms;
     taskEXIT_CRITICAL(&s_telemetry_lock);
 
+    meb_diag_record_eventf("control", "telemetry_interval", "ms=%" PRIu32, interval_ms);
     return ESP_OK;
 }
 
@@ -53,9 +55,11 @@ static void control_task(void *arg)
     while (1) {
         meb_heating_auto_off_reason_t auto_off_reason = meb_state_apply_auto_off();
         if (auto_off_reason != MEB_HEATING_AUTO_OFF_NONE) {
+            const char *reason = auto_off_reason == MEB_HEATING_AUTO_OFF_TIMER ? "timer" : "safety";
+            meb_diag_record_eventf("control", "heating_auto_off", "reason=%s", reason);
             meb_serial_printf("{\"v\":%d,\"type\":\"control.heating_auto_off\",\"reason\":\"%s\"}\n",
                               MEB_PREHEATER_PROTOCOL_VERSION,
-                              auto_off_reason == MEB_HEATING_AUTO_OFF_TIMER ? "timer" : "safety");
+                              reason);
         }
 
         meb_state_snapshot_t state;
@@ -63,6 +67,7 @@ static void control_task(void *arg)
 
         if (state.heating_enabled && state.temperature_status_charge == MEB_TEMPERATURE_STATUS_UNDER_OPTIMAL) {
             if (meb_state_take_session_error()) {
+                meb_diag_record_event("control", "diag_session_retry", "");
                 meb_serial_printf("{\"v\":%d,\"type\":\"control.diag_session_retry\"}\n", MEB_PREHEATER_PROTOCOL_VERSION);
                 (void)meb_can_request_diag_session();
             } else {

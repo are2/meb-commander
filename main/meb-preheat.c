@@ -3,6 +3,7 @@
 #include "ble_console.h"
 #include "can_bus.h"
 #include "control.h"
+#include "diagnostics.h"
 #include "power_management.h"
 #include "serial_console.h"
 #include "status_led.h"
@@ -14,6 +15,7 @@ static const char *TAG = "meb-preheat";
 
 void app_main(void)
 {
+    ESP_ERROR_CHECK(meb_diag_init());
     ESP_ERROR_CHECK(meb_state_init());
     ESP_ERROR_CHECK(meb_power_management_init());
     ESP_ERROR_CHECK(meb_serial_console_init());
@@ -24,5 +26,6 @@ void app_main(void)
     ESP_ERROR_CHECK(meb_control_start());
 
     ESP_LOGI(TAG, "MEB preheat controller running (%s build)", MEB_BUILD_MODE);
+    meb_diag_record_event("system", "ready", MEB_BUILD_MODE);
     meb_serial_printf("{\"v\":%d,\"type\":\"device.ready\",\"version\":\"%s\"}\n", MEB_PREHEATER_PROTOCOL_VERSION, MEB_APP_VERSION);
 }

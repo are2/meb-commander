@@ -5,6 +5,7 @@
 #if CONFIG_BT_NIMBLE_ENABLED
 
 #include "serial_console.h"
+#include "diagnostics.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -151,6 +152,7 @@ static void queue_line(const char *line)
 
     if (xQueueSend(s_command_queue, &cmd, 0) != pdPASS) {
         ESP_LOGW(TAG, "dropping BLE JSON-RPC command because command queue is full");
+        meb_diag_record_event("ble", "cmd_queue_full", "");
     }
 }
 
@@ -172,6 +174,7 @@ static void feed_rx_bytes(const uint8_t *data, size_t len)
             s_rx_line[s_rx_line_len++] = (char)c;
         } else {
             ESP_LOGW(TAG, "dropping overlong BLE JSON-RPC command");
+            meb_diag_record_event("ble", "cmd_overlong", "");
             s_rx_line_len = 0;
         }
     }
@@ -225,14 +228,17 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg)
         if (event->connect.status == 0) {
             (void)alloc_peer(event->connect.conn_handle);
             ESP_LOGI(TAG, "BLE client connected, handle=%u", event->connect.conn_handle);
+            meb_diag_record_eventf("ble", "connected", "handle=%u", event->connect.conn_handle);
         } else {
             ESP_LOGW(TAG, "BLE connection failed, status=%d", event->connect.status);
+            meb_diag_record_eventf("ble", "connect_failed", "status=%d", event->connect.status);
             advertise();
         }
         return 0;
 
     case BLE_GAP_EVENT_DISCONNECT:
         ESP_LOGI(TAG, "BLE client disconnected, reason=%d", event->disconnect.reason);
+        meb_diag_record_eventf("ble", "disconnected", "reason=%d", event->disconnect.reason);
         remove_peer(event->disconnect.conn.conn_handle);
         advertise();
         return 0;
@@ -250,12 +256,17 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg)
             ESP_LOGI(TAG, "BLE TX notifications %s for handle=%u",
                      event->subscribe.cur_notify ? "enabled" : "disabled",
                      event->subscribe.conn_handle);
+            meb_diag_record_eventf("ble", "notify", "%s handle=%u",
+                                   event->subscribe.cur_notify ? "on" : "off",
+                                   event->subscribe.conn_handle);
         }
         return 0;
 
     case BLE_GAP_EVENT_MTU:
         ESP_LOGI(TAG, "BLE MTU updated, handle=%u mtu=%u",
                  event->mtu.conn_handle, event->mtu.value);
+        meb_diag_record_eventf("ble", "mtu", "handle=%u mtu=%u",
+                               event->mtu.conn_handle, event->mtu.value);
         return 0;
 
     default:
@@ -306,6 +317,7 @@ static void advertise(void)
 static void on_reset(int reason)
 {
     ESP_LOGE(TAG, "BLE host reset, reason=%d", reason);
+    meb_diag_record_eventf("ble", "host_reset", "reason=%d", reason);
 }
 
 static void on_sync(void)
@@ -325,6 +337,7 @@ static void on_sync(void)
     s_ble_started = true;
     advertise();
     ESP_LOGI(TAG, "BLE JSON-RPC service advertising as %s", MEB_BLE_DEVICE_NAME);
+    meb_diag_record_event("ble", "advertising", MEB_BLE_DEVICE_NAME);
 }
 
 static void host_task(void *param)
@@ -440,6 +453,7 @@ void meb_ble_console_write(const char *data, size_t len)
             struct os_mbuf *om = ble_hs_mbuf_from_flat(data + offset, chunk_len);
             if (!om) {
                 ESP_LOGW(TAG, "failed to allocate BLE notification buffer");
+                meb_diag_record_event("ble", "notify_oom", "");
                 break;
             }
 
@@ -447,6 +461,8 @@ void meb_ble_console_write(const char *data, size_t len)
             if (rc != 0) {
                 ESP_LOGD(TAG, "BLE notification failed for handle=%u rc=%d",
                          s_peers[i].conn_handle, rc);
+                meb_diag_record_eventf("ble", "notify_failed", "handle=%u rc=%d",
+                                       s_peers[i].conn_handle, rc);
                 break;
             }
 

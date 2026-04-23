@@ -1,6 +1,7 @@
 #include "can_bus.h"
 #include "app_config.h"
 #include "app_state.h"
+#include "diagnostics.h"
 
 #include <inttypes.h>
 #include <string.h>
@@ -146,6 +147,7 @@ static esp_err_t transmit_fd_frame(uint32_t id, const uint8_t data[8], const cha
     esp_err_t err = twai_node_transmit(s_twai_node, &frame, 500);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "%s transmit failed: %s", name, esp_err_to_name(err));
+        meb_diag_record_eventf("can", "tx_failed", "%s:%s", name, esp_err_to_name(err));
     }
 
     return err;
@@ -279,5 +281,6 @@ esp_err_t meb_can_init(void)
 
     ESP_LOGI(TAG, "TWAI FD started: TX GPIO %d, RX GPIO %d, %d/%d bit/s", MEB_TWAI_TX_GPIO, MEB_TWAI_RX_GPIO,
              MEB_TWAI_BITRATE, MEB_TWAI_DATA_BITRATE);
+    meb_diag_record_eventf("can", "started", "%d/%d bit/s", MEB_TWAI_BITRATE, MEB_TWAI_DATA_BITRATE);
     return ESP_OK;
 }

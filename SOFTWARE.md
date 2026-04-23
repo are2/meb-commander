@@ -129,9 +129,13 @@ Supported methods:
 {"jsonrpc":"2.0","id":1,"method":"heating.set","params":{"enabled":true}}
 {"jsonrpc":"2.0","id":2,"method":"heating.get"}
 {"jsonrpc":"2.0","id":3,"method":"device.info"}
-{"jsonrpc":"2.0","id":4,"method":"telemetry.set_interval","params":{"ms":1000}}
-{"jsonrpc":"2.0","id":5,"method":"heating.set_auto_off_timer","params":{"minutes":30}}
-{"jsonrpc":"2.0","id":6,"method":"firmware.status"}
+{"jsonrpc":"2.0","id":4,"method":"device.uptime"}
+{"jsonrpc":"2.0","id":5,"method":"device.reset"}
+{"jsonrpc":"2.0","id":6,"method":"device.diagnostics","params":{"limit":5}}
+{"jsonrpc":"2.0","id":7,"method":"device.events","params":{"limit":8}}
+{"jsonrpc":"2.0","id":8,"method":"telemetry.set_interval","params":{"ms":1000}}
+{"jsonrpc":"2.0","id":9,"method":"heating.set_auto_off_timer","params":{"minutes":30}}
+{"jsonrpc":"2.0","id":10,"method":"firmware.status"}
 ```
 
 JSON-RPC success response examples:
@@ -140,8 +144,12 @@ JSON-RPC success response examples:
 {"jsonrpc":"2.0","id":1,"result":{"heating_enabled":true,"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0,"temperature_status":1,"auto_off_timer_enabled":false,"auto_off_timer_minutes":0,"auto_off_remaining_minutes":180}}
 {"jsonrpc":"2.0","id":2,"result":{"heating_enabled":true,"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0,"temperature_status":1,"auto_off_timer_enabled":false,"auto_off_timer_minutes":0,"auto_off_remaining_minutes":180}}
 {"jsonrpc":"2.0","id":3,"result":{"version":"0.4.0","about":"MEB preheat CAN controller","protocol_version":2,"release_build":false,"build_mode":"development","serial":{"uart":0,"baud_rate":115200,"tx_gpio":11,"rx_gpio":12},"ble":{"name":"MEB-Preheat","service_uuid":"7e57c000-f8aa-4a1f-9af3-9c0b7fd90e00","rx_uuid":"7e57c001-f8aa-4a1f-9af3-9c0b7fd90e00","tx_uuid":"7e57c002-f8aa-4a1f-9af3-9c0b7fd90e00"},"telemetry_interval_ms":1000,"heating":{"safety_auto_off_enabled":true,"safety_auto_off_minutes":180},"can":{"tx_gpio":4,"rx_gpio":5,"bitrate":500000,"data_bitrate":2000000}}}
-{"jsonrpc":"2.0","id":4,"result":{"interval_ms":1000}}
-{"jsonrpc":"2.0","id":5,"result":{"heating_enabled":true,"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0,"temperature_status":1,"auto_off_timer_enabled":true,"auto_off_timer_minutes":30,"auto_off_remaining_minutes":30}}
+{"jsonrpc":"2.0","id":4,"result":{"uptime_ms":123456,"reset":{"reason":1,"name":"poweron"}}}
+{"jsonrpc":"2.0","id":5,"result":{"resetting":true,"delay_ms":500}}
+{"jsonrpc":"2.0","id":6,"result":{"uptime_ms":123456,"reset":{"reason":1,"name":"poweron"},"heap":{"free":210000,"minimum_free":198000,"free_8bit":210000,"minimum_free_8bit":198000,"largest_free_8bit_block":120000},"event_log":{"capacity":16,"count":1,"returned":1,"overwritten":0,"events":[{"seq":1,"ts_ms":8,"c":"system","e":"boot","d":"reset=poweron","heap":226000,"min_heap":226000}]}}}
+{"jsonrpc":"2.0","id":7,"result":{"capacity":16,"count":1,"returned":1,"overwritten":0,"events":[{"seq":1,"ts_ms":8,"c":"system","e":"boot","d":"reset=poweron","heap":226000,"min_heap":226000}]}}
+{"jsonrpc":"2.0","id":8,"result":{"interval_ms":1000}}
+{"jsonrpc":"2.0","id":9,"result":{"heating_enabled":true,"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0,"temperature_status":1,"auto_off_timer_enabled":true,"auto_off_timer_minutes":30,"auto_off_remaining_minutes":30}}
 ```
 
 JSON-RPC error response example:
@@ -153,6 +161,12 @@ JSON-RPC error response example:
 `telemetry.set_interval` accepts `params.ms` from `100` to `60000`.
 
 `heating.set_auto_off_timer` accepts `params.minutes`. A value greater than zero starts that many minutes of user auto-off countdown whenever heating is enabled; setting `minutes` to `0` disables the user timer. The safety auto-off limit still turns heating off after 180 minutes by default even when the user timer is disabled. Build config `MEB_DISABLE_SAFETY_AUTO_OFF` disables that safety limit, and `MEB_SAFETY_AUTO_OFF_MINUTES` changes the default 3 hour duration.
+
+`device.uptime` returns milliseconds since the current firmware boot and the last reset reason reported by ESP-IDF. If the device disconnected because the firmware crashed and rebooted, the next connection should show a short `uptime_ms` and a reset name such as `panic`, `task_watchdog`, or `watchdog`.
+
+`device.reset` schedules a software reset after a short delay so the JSON-RPC response can be sent first. The command has no params.
+
+`device.diagnostics` returns uptime, reset reason, heap statistics, and a compact in-RAM event log. `device.events` returns only the event log. Both accept optional `params.limit`; diagnostics returns at most the most recent 5 events and the event-only call returns at most 8 events to keep BLE responses small. Events are intentionally compact: `c` is component, `e` is event name, `d` is detail text, and each event includes free heap and minimum free heap at the time it was recorded.
 
 ## Firmware Update Protocol
 
@@ -238,6 +252,9 @@ The helper client uses Python Bleak:
 ```powershell
 python -m pip install bleak
 python scripts\meb_ble_client.py --info
+python scripts\meb_ble_client.py --reset
+python scripts\meb_ble_client.py --diagnostics
+python scripts\meb_ble_client.py --events --event-limit 8
 python scripts\meb_ble_client.py --enable --watch
 python scripts\meb_ble_client.py --auto-off-minutes 30
 python scripts\meb_ble_client.py --auto-off-minutes 0
@@ -255,7 +272,7 @@ Telemetry event:
 Other events:
 
 ```json
-{"v":2,"type":"device.ready","version":"0.3.0"}
+{"v":2,"type":"device.ready","version":"0.4.0"}
 {"v":2,"type":"control.diag_session_retry"}
 {"v":2,"type":"control.heating_auto_off","reason":"safety"}
 ```
@@ -283,6 +300,7 @@ The native connector labelled `USB` / USB Serial/JTAG is kept enabled for debug/
 | `main/app_state.c` | Shared state updated by CAN and read by control, telemetry, and LED tasks. |
 | `main/can_bus.c` | TWAI FD setup, RX dispatch, diagnostic session TX, heat request TX. |
 | `main/control.c` | Heating request state machine, versioned telemetry events, and telemetry interval setting. |
+| `main/diagnostics.c` | Uptime, reset reason, heap snapshot, and in-RAM event log. |
 | `main/ota_update.c` | Chunked firmware update state machine using ESP-IDF OTA partitions. |
 | `main/status_led.c` | Four-color LED status logic. |
 | `main/serial_console.c` | UART0 JSON-RPC command parser and JSON output. |

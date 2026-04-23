@@ -1,6 +1,8 @@
 #include "app_state.h"
 #include "app_config.h"
+#include "diagnostics.h"
 
+#include <inttypes.h>
 #include <string.h>
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -101,7 +103,10 @@ void meb_state_get_snapshot(meb_state_snapshot_t *snapshot)
 
 void meb_state_set_heating_enabled(bool enabled)
 {
+    bool changed = false;
+
     lock_state();
+    changed = s_state.heating_enabled != enabled;
     if (enabled) {
         if (!s_state.heating_enabled) {
             int64_t now_us = esp_timer_get_time();
@@ -116,6 +121,10 @@ void meb_state_set_heating_enabled(bool enabled)
     }
     s_state.heating_enabled = enabled;
     unlock_state();
+
+    if (changed) {
+        meb_diag_record_eventf("control", "heating_enabled", "enabled=%s", enabled ? "true" : "false");
+    }
 }
 
 bool meb_state_is_heating_enabled(void)
@@ -142,6 +151,7 @@ esp_err_t meb_state_set_auto_off_timer_minutes(uint32_t minutes)
     }
     unlock_state();
 
+    meb_diag_record_eventf("control", "auto_off_timer", "minutes=%" PRIu32, minutes);
     return ESP_OK;
 }
 
@@ -199,6 +209,7 @@ void meb_state_update_diag_response(const uint8_t *data, uint16_t len)
         lock_state();
         s_state.session_error = true;
         unlock_state();
+        meb_diag_record_event("can", "diag_negative", "routine rejected");
     }
 }
 
