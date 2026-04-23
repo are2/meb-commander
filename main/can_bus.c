@@ -13,12 +13,16 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "hal/twai_types.h"
+#include "soc/soc_caps.h"
 
-#define RX_QUEUE_DEPTH 32
+#define RX_QUEUE_DEPTH 64
 #define RX_TASK_STACK_SIZE 4096
 #define RX_TASK_PRIORITY 8
 #define TEST_TX_TASK_STACK_SIZE 4096
 #define TEST_TX_TASK_PRIORITY 5
+#define DIAG_POLL_PERIOD_MS 100
+#define DIAG_REPORT_PERIOD_MS 1000
+#define FULL_MASK TWAI_EXT_ID_MASK
 
 typedef struct {
     twai_frame_header_t header;
@@ -29,6 +33,14 @@ typedef struct {
 static const char *TAG = "can_bus";
 static twai_node_handle_t s_twai_node;
 static QueueHandle_t s_rx_queue;
+static volatile uint32_t s_rx_queue_overflow_count;
+static volatile uint32_t s_error_event_count;
+static volatile uint32_t s_last_error_flags;
+static volatile uint32_t s_state_change_count;
+static volatile uint32_t s_last_old_state;
+static volatile uint32_t s_last_new_state;
+static volatile uint32_t s_tx_failure_count;
+static volatile uint32_t s_last_tx_failure_id;
 
 static uint16_t frame_payload_len(const twai_frame_header_t *header)
 {
@@ -53,7 +65,9 @@ static bool twai_rx_done_callback(twai_node_handle_t handle, const twai_rx_done_
     if (twai_node_receive_from_isr(handle, &frame) == ESP_OK) {
         msg.header = frame.header;
         msg.len = frame_payload_len(&frame.header);
-        (void)xQueueSendFromISR(rx_queue, &msg, &woken);
+        if (xQueueSendFromISR(rx_queue, &msg, &woken) != pdPASS) {
+            s_rx_queue_overflow_count++;
+        }
     }
 
     return woken == pdTRUE;
@@ -65,7 +79,8 @@ static bool twai_tx_done_callback(twai_node_handle_t handle, const twai_tx_done_
     (void)user_ctx;
 
     if (!edata->is_tx_success) {
-        ESP_EARLY_LOGW(TAG, "TWAI TX failed for ID 0x%" PRIX32, edata->done_tx_frame->header.id);
+        s_tx_failure_count++;
+        s_last_tx_failure_id = edata->done_tx_frame ? edata->done_tx_frame->header.id : 0;
     }
 
     return false;
@@ -75,7 +90,8 @@ static bool twai_error_callback(twai_node_handle_t handle, const twai_error_even
 {
     (void)handle;
     (void)user_ctx;
-    ESP_EARLY_LOGW(TAG, "TWAI error flags 0x%" PRIX32, edata->err_flags.val);
+    s_error_event_count++;
+    s_last_error_flags = edata->err_flags.val;
     return false;
 }
 
@@ -83,7 +99,9 @@ static bool twai_state_change_callback(twai_node_handle_t handle, const twai_sta
 {
     (void)handle;
     (void)user_ctx;
-    ESP_EARLY_LOGW(TAG, "TWAI state %d -> %d", edata->old_sta, edata->new_sta);
+    s_state_change_count++;
+    s_last_old_state = (uint32_t)edata->old_sta;
+    s_last_new_state = (uint32_t)edata->new_sta;
     return false;
 }
 
@@ -114,14 +132,65 @@ static void process_rx_message(const meb_can_rx_message_t *msg)
     }
 }
 
+static void report_isr_diagnostics(void)
+{
+    static uint32_t last_overflow_count;
+    static uint32_t last_error_event_count;
+    static uint32_t last_state_change_count;
+    static uint32_t last_tx_failure_count;
+
+    uint32_t overflow_count = s_rx_queue_overflow_count;
+    if (overflow_count != last_overflow_count) {
+        uint32_t dropped = overflow_count - last_overflow_count;
+        last_overflow_count = overflow_count;
+        ESP_LOGW(TAG, "dropped %" PRIu32 " CAN frames because the RX queue was full", dropped);
+        meb_diag_record_eventf("can", "rx_queue_full", "dropped=%" PRIu32, dropped);
+    }
+
+    uint32_t error_event_count = s_error_event_count;
+    if (error_event_count != last_error_event_count) {
+        uint32_t errors = error_event_count - last_error_event_count;
+        uint32_t last_flags = s_last_error_flags;
+        last_error_event_count = error_event_count;
+        ESP_LOGW(TAG, "TWAI errors=%" PRIu32 " last_flags=0x%" PRIX32, errors, last_flags);
+        meb_diag_record_eventf("can", "error", "count=%" PRIu32 " flags=0x%" PRIX32, errors, last_flags);
+    }
+
+    uint32_t state_change_count = s_state_change_count;
+    if (state_change_count != last_state_change_count) {
+        uint32_t changes = state_change_count - last_state_change_count;
+        uint32_t old_state = s_last_old_state;
+        uint32_t new_state = s_last_new_state;
+        last_state_change_count = state_change_count;
+        ESP_LOGW(TAG, "TWAI state changes=%" PRIu32 " last=%" PRIu32 "->%" PRIu32, changes, old_state, new_state);
+        meb_diag_record_eventf("can", "state", "count=%" PRIu32 " %u->%u", changes, old_state, new_state);
+    }
+
+    uint32_t tx_failure_count = s_tx_failure_count;
+    if (tx_failure_count != last_tx_failure_count) {
+        uint32_t failures = tx_failure_count - last_tx_failure_count;
+        uint32_t last_id = s_last_tx_failure_id;
+        last_tx_failure_count = tx_failure_count;
+        ESP_LOGW(TAG, "TWAI TX failures=%" PRIu32 " last_id=0x%" PRIX32, failures, last_id);
+        meb_diag_record_eventf("can", "tx_failed_isr", "count=%" PRIu32 " id=0x%" PRIX32, failures, last_id);
+    }
+}
+
 static void can_rx_task(void *arg)
 {
     (void)arg;
     meb_can_rx_message_t msg;
+    TickType_t last_report_tick = xTaskGetTickCount();
 
     while (1) {
-        if (xQueueReceive(s_rx_queue, &msg, portMAX_DELAY) == pdTRUE) {
+        if (xQueueReceive(s_rx_queue, &msg, pdMS_TO_TICKS(DIAG_POLL_PERIOD_MS)) == pdTRUE) {
             process_rx_message(&msg);
+        }
+
+        TickType_t now = xTaskGetTickCount();
+        if ((now - last_report_tick) >= pdMS_TO_TICKS(DIAG_REPORT_PERIOD_MS)) {
+            report_isr_diagnostics();
+            last_report_tick = now;
         }
     }
 }
@@ -171,6 +240,7 @@ esp_err_t meb_can_send_heat_request(void)
     return transmit_fd_frame(MEB_CAN_ID_DIAG_REQ, data, "heat_request");
 }
 
+#if MEB_CAN_TEST_TX_ENABLED
 static void can_test_tx_task(void *arg)
 {
     (void)arg;
@@ -186,6 +256,7 @@ static void can_test_tx_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(MEB_CAN_TEST_TX_PERIOD_MS));
     }
 }
+#endif
 
 esp_err_t meb_can_start_test_tx(void)
 {
@@ -230,6 +301,51 @@ static esp_err_t configure_exact_canfd_timing(void)
     return twai_node_reconfig_timing(s_twai_node, &bit_timing, &data_timing);
 }
 
+static esp_err_t configure_rx_filters(void)
+{
+#if SOC_TWAI_MASK_FILTER_NUM < 3 || SOC_TWAI_RANGE_FILTER_NUM < 1
+#error "This firmware expects at least 3 TWAI mask filters and 1 range filter"
+#endif
+    static const twai_mask_filter_config_t disable_filter = {
+        .id = UINT32_MAX,
+        .mask = UINT32_MAX,
+        .is_ext = true,
+    };
+
+    for (uint8_t i = 0; i < SOC_TWAI_MASK_FILTER_NUM; i++) {
+        ESP_RETURN_ON_ERROR(twai_node_config_mask_filter(s_twai_node, i, &disable_filter), TAG,
+                            "failed to disable TWAI mask filter %u", i);
+    }
+
+#if SOC_TWAI_RANGE_FILTER_NUM > 0
+    static const twai_range_filter_config_t dynamic_filter = {
+        .range_low = MEB_CAN_ID_DYNAMIC,
+        .range_high = MEB_CAN_ID_HEATING_STATUS,
+        .is_ext = true,
+    };
+    ESP_RETURN_ON_ERROR(twai_node_config_range_filter(s_twai_node, 0, &dynamic_filter), TAG,
+                        "failed to configure TWAI range filter");
+#endif
+
+    const uint32_t exact_ids[] = {
+        MEB_CAN_ID_DIAG_RESP,
+        MEB_CAN_ID_CHARGING_OPTIMIZATION,
+        MEB_CAN_ID_TEMPERATURE,
+    };
+
+    for (uint8_t i = 0; i < sizeof(exact_ids) / sizeof(exact_ids[0]); i++) {
+        twai_mask_filter_config_t filter = {
+            .id = exact_ids[i],
+            .mask = FULL_MASK,
+            .is_ext = true,
+        };
+        ESP_RETURN_ON_ERROR(twai_node_config_mask_filter(s_twai_node, i, &filter), TAG,
+                            "failed to configure TWAI mask filter %u", i);
+    }
+
+    return ESP_OK;
+}
+
 esp_err_t meb_can_init(void)
 {
     s_rx_queue = xQueueCreate(RX_QUEUE_DEPTH, sizeof(meb_can_rx_message_t));
@@ -259,13 +375,7 @@ esp_err_t meb_can_init(void)
 
     ESP_RETURN_ON_ERROR(twai_new_node_onchip(&node_config, &s_twai_node), TAG, "failed to create TWAI node");
     ESP_RETURN_ON_ERROR(configure_exact_canfd_timing(), TAG, "failed to configure exact TWAI timing");
-
-    twai_range_filter_config_t filter = {
-        .range_low = 0x12000000U,
-        .range_high = 0x1AFFFFFFU,
-        .is_ext = true,
-    };
-    ESP_RETURN_ON_ERROR(twai_node_config_range_filter(s_twai_node, 0, &filter), TAG, "failed to configure TWAI range filter");
+    ESP_RETURN_ON_ERROR(configure_rx_filters(), TAG, "failed to configure TWAI RX filters");
 
     twai_event_callbacks_t callbacks = {
         .on_rx_done = twai_rx_done_callback,
