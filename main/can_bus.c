@@ -25,6 +25,7 @@
 #define FULL_MASK TWAI_EXT_ID_MASK
 #define MEB_CAN_ARB_SAMPLE_POINT_PERMILL 875
 #define MEB_CAN_DATA_SAMPLE_POINT_PERMILL 750
+#define MEB_CAN_DATA_SSP_PERMILL 700
 
 typedef struct {
     twai_frame_header_t header;
@@ -430,6 +431,8 @@ static esp_err_t configure_exact_canfd_timing(void)
         .tseg_1 = 22,
         .tseg_2 = 10,
         .sjw = 5,
+        /* 40 tq total in the 2 Mbit/s data phase, so 70.0% SSP is 28 tq. */
+        .ssp_offset = 28,
     };
 
     switch (MEB_TWAI_DATA_BITRATE) {
@@ -537,7 +540,9 @@ esp_err_t meb_can_init(void)
 
     ESP_LOGI(TAG, "TWAI FD started: TX GPIO %d, RX GPIO %d, %d/%d bit/s", MEB_TWAI_TX_GPIO, MEB_TWAI_RX_GPIO,
              MEB_TWAI_BITRATE, MEB_TWAI_DATA_BITRATE);
-    meb_diag_record_eventf("can", "started", "%d/%d bit/s sp=%u/%u", MEB_TWAI_BITRATE, MEB_TWAI_DATA_BITRATE,
-                           MEB_CAN_ARB_SAMPLE_POINT_PERMILL, MEB_CAN_DATA_SAMPLE_POINT_PERMILL);
+    meb_diag_record_eventf("can", "started", "%d/%d bit/s sp=%u/%u ssp=%u",
+                           MEB_TWAI_BITRATE, MEB_TWAI_DATA_BITRATE,
+                           MEB_CAN_ARB_SAMPLE_POINT_PERMILL, MEB_CAN_DATA_SAMPLE_POINT_PERMILL,
+                           MEB_CAN_DATA_SSP_PERMILL);
     return ESP_OK;
 }
