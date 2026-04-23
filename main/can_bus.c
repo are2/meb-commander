@@ -130,6 +130,33 @@ static const char *twai_state_name_short(uint32_t state)
     }
 }
 
+void meb_can_get_diagnostics(meb_can_diagnostics_t *diag)
+{
+    if (!diag) {
+        return;
+    }
+
+    memset(diag, 0, sizeof(*diag));
+    diag->ready = s_twai_node != NULL;
+    diag->arbitration_sample_point_permill = MEB_CAN_ARB_SAMPLE_POINT_PERMILL;
+    diag->data_sample_point_permill = MEB_CAN_DATA_SAMPLE_POINT_PERMILL;
+    diag->data_ssp_permill = MEB_CAN_DATA_SSP_PERMILL;
+    diag->rx_queue_overflow_count = s_rx_queue_overflow_count;
+    diag->error_event_count = s_error_event_count;
+    diag->state_change_count = s_state_change_count;
+    diag->tx_failure_count = s_tx_failure_count;
+    diag->last_error_flags = s_last_error_flags;
+    diag->last_tx_failure_id = s_last_tx_failure_id;
+
+    for (size_t i = 0; i < 4; i++) {
+        diag->state_entry_count[i] = s_state_entry_count[i];
+    }
+
+    if (s_twai_node) {
+        (void)twai_node_get_info(s_twai_node, &diag->node_status, &diag->node_record);
+    }
+}
+
 static void append_flag_name(char *buf, size_t buf_len, size_t *pos, const char *name)
 {
     if (!buf || !pos || !name || *pos >= buf_len - 1) {

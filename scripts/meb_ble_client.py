@@ -127,6 +127,9 @@ async def run_once(meb: MebBleClient, args: argparse.Namespace) -> bool:
         params = {"limit": args.event_limit} if args.event_limit is not None else None
         print(json.dumps(await meb.rpc("device.diagnostics", params), indent=2))
         return True
+    if args.can_diagnostics:
+        print(json.dumps(await meb.rpc("device.can_diagnostics"), indent=2))
+        return True
     if args.events:
         params = {"limit": args.event_limit} if args.event_limit is not None else None
         print(json.dumps(await meb.rpc("device.events", params), indent=2))
@@ -148,7 +151,7 @@ async def run_once(meb: MebBleClient, args: argparse.Namespace) -> bool:
 
 
 async def interactive(meb: MebBleClient) -> None:
-    print("Connected. Commands: enable, disable, get, info, uptime, reset, diag, events [limit], interval <ms>, timer <minutes|off>, raw <json>, quit")
+    print("Connected. Commands: enable, disable, get, info, uptime, reset, diag, candiag, events [limit], interval <ms>, timer <minutes|off>, raw <json>, quit")
 
     while True:
         line = await asyncio.to_thread(input, "meb> ")
@@ -173,6 +176,8 @@ async def interactive(meb: MebBleClient) -> None:
                 response = await meb.rpc("device.reset")
             elif line == "diag":
                 response = await meb.rpc("device.diagnostics")
+            elif line in {"candiag", "can-diag", "can_diagnostics"}:
+                response = await meb.rpc("device.can_diagnostics")
             elif line.startswith("events"):
                 parts = line.split(maxsplit=1)
                 params = {"limit": int(parts[1])} if len(parts) > 1 else None
@@ -211,6 +216,7 @@ async def main_async(args: argparse.Namespace) -> None:
                 args.uptime,
                 args.reset,
                 args.diagnostics,
+                args.can_diagnostics,
                 args.events,
                 args.interval_ms is not None,
                 args.auto_off_minutes is not None,
@@ -246,6 +252,7 @@ def parse_args() -> argparse.Namespace:
     actions.add_argument("--uptime", action="store_true", help="Read uptime and last reset reason")
     actions.add_argument("--reset", action="store_true", help="Reset the device")
     actions.add_argument("--diagnostics", action="store_true", help="Read uptime, heap stats, and recent firmware events")
+    actions.add_argument("--can-diagnostics", action="store_true", help="Read live CAN/TWAI controller diagnostics")
     actions.add_argument("--events", action="store_true", help="Read recent firmware diagnostic events")
     actions.add_argument("--interval-ms", type=int, help="Set telemetry interval")
     actions.add_argument(

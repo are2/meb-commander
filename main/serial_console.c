@@ -2,6 +2,7 @@
 #include "app_config.h"
 #include "app_state.h"
 #include "ble_console.h"
+#include "can_bus.h"
 #include "control.h"
 #include "diagnostics.h"
 #include "ota_update.h"
@@ -518,6 +519,70 @@ static void handle_device_diagnostics(bool has_id, const char *id_token, const c
                     event_log);
 }
 
+static const char *can_state_name(uint32_t state)
+{
+    switch ((twai_error_state_t)state) {
+    case TWAI_ERROR_ACTIVE:
+        return "active";
+    case TWAI_ERROR_WARNING:
+        return "warning";
+    case TWAI_ERROR_PASSIVE:
+        return "passive";
+    case TWAI_ERROR_BUS_OFF:
+        return "bus_off";
+    default:
+        return "unknown";
+    }
+}
+
+static void handle_device_can_diagnostics(bool has_id, const char *id_token)
+{
+    meb_can_diagnostics_t diag;
+    meb_can_get_diagnostics(&diag);
+
+    send_rpc_result(has_id, id_token,
+                    "{"
+                    "\"ready\":%s,"
+                    "\"timing\":{\"arb_sample_point_permill\":%" PRIu32 ","
+                    "\"data_sample_point_permill\":%" PRIu32 ","
+                    "\"data_ssp_permill\":%" PRIu32 "},"
+                    "\"node\":{\"state\":{\"value\":%u,\"name\":\"%s\"},"
+                    "\"tx_error_count\":%u,\"rx_error_count\":%u,"
+                    "\"tx_queue_remaining\":%" PRIu32 ","
+                    "\"bus_error_count\":%" PRIu32 "},"
+                    "\"counters\":{\"rx_queue_overflow\":%" PRIu32 ","
+                    "\"error_events\":%" PRIu32 ","
+                    "\"state_changes\":%" PRIu32 ","
+                    "\"tx_failures\":%" PRIu32 "},"
+                    "\"last\":{\"error_flags\":%" PRIu32 ","
+                    "\"tx_failure_id\":%" PRIu32 "},"
+                    "\"state_entries\":{\"active\":%" PRIu32 ","
+                    "\"warning\":%" PRIu32 ","
+                    "\"passive\":%" PRIu32 ","
+                    "\"bus_off\":%" PRIu32 "}"
+                    "}",
+                    diag.ready ? "true" : "false",
+                    diag.arbitration_sample_point_permill,
+                    diag.data_sample_point_permill,
+                    diag.data_ssp_permill,
+                    (unsigned)diag.node_status.state,
+                    can_state_name((uint32_t)diag.node_status.state),
+                    (unsigned)diag.node_status.tx_error_count,
+                    (unsigned)diag.node_status.rx_error_count,
+                    diag.node_status.tx_queue_remaining,
+                    diag.node_record.bus_err_num,
+                    diag.rx_queue_overflow_count,
+                    diag.error_event_count,
+                    diag.state_change_count,
+                    diag.tx_failure_count,
+                    diag.last_error_flags,
+                    diag.last_tx_failure_id,
+                    diag.state_entry_count[TWAI_ERROR_ACTIVE],
+                    diag.state_entry_count[TWAI_ERROR_WARNING],
+                    diag.state_entry_count[TWAI_ERROR_PASSIVE],
+                    diag.state_entry_count[TWAI_ERROR_BUS_OFF]);
+}
+
 static void handle_device_info(bool has_id, const char *id_token)
 {
     send_rpc_result(has_id, id_token,
@@ -743,6 +808,8 @@ void meb_serial_console_process_command(const char *cmd)
         handle_device_reset(has_id, id_token);
     } else if (strcmp(method, "device.diagnostics") == 0) {
         handle_device_diagnostics(has_id, id_token, cmd);
+    } else if (strcmp(method, "device.can_diagnostics") == 0) {
+        handle_device_can_diagnostics(has_id, id_token);
     } else if (strcmp(method, "device.events") == 0) {
         handle_device_events(has_id, id_token, cmd);
     } else if (strcmp(method, "telemetry.set_interval") == 0) {
