@@ -23,6 +23,8 @@
 #define DIAG_POLL_PERIOD_MS 100
 #define DIAG_REPORT_PERIOD_MS 1000
 #define FULL_MASK TWAI_EXT_ID_MASK
+#define MEB_CAN_ARB_SAMPLE_POINT_PERMILL 875
+#define MEB_CAN_DATA_SAMPLE_POINT_PERMILL 750
 
 typedef struct {
     twai_frame_header_t header;
@@ -412,6 +414,10 @@ esp_err_t meb_can_start_test_tx(void)
 
 static esp_err_t configure_exact_canfd_timing(void)
 {
+    /* Keep arbitration at 87.5% like the older STM32/Zephyr build, but move
+     * the 2 Mbit/s data phase to 75.0%, which is the typical CAN FD default
+     * and what the older project would have used implicitly.
+     */
     const twai_timing_advanced_config_t bit_timing = {
         .brp = 4,
         .prop_seg = 8,
@@ -420,10 +426,10 @@ static esp_err_t configure_exact_canfd_timing(void)
         .sjw = 2,
     };
     twai_timing_advanced_config_t data_timing = {
-        .prop_seg = 8,
-        .tseg_1 = 26,
-        .tseg_2 = 5,
-        .sjw = 2,
+        .prop_seg = 7,
+        .tseg_1 = 22,
+        .tseg_2 = 10,
+        .sjw = 5,
     };
 
     switch (MEB_TWAI_DATA_BITRATE) {
@@ -531,6 +537,7 @@ esp_err_t meb_can_init(void)
 
     ESP_LOGI(TAG, "TWAI FD started: TX GPIO %d, RX GPIO %d, %d/%d bit/s", MEB_TWAI_TX_GPIO, MEB_TWAI_RX_GPIO,
              MEB_TWAI_BITRATE, MEB_TWAI_DATA_BITRATE);
-    meb_diag_record_eventf("can", "started", "%d/%d bit/s", MEB_TWAI_BITRATE, MEB_TWAI_DATA_BITRATE);
+    meb_diag_record_eventf("can", "started", "%d/%d bit/s sp=%u/%u", MEB_TWAI_BITRATE, MEB_TWAI_DATA_BITRATE,
+                           MEB_CAN_ARB_SAMPLE_POINT_PERMILL, MEB_CAN_DATA_SAMPLE_POINT_PERMILL);
     return ESP_OK;
 }
