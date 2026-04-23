@@ -36,9 +36,11 @@ static QueueHandle_t s_rx_queue;
 static volatile uint32_t s_rx_queue_overflow_count;
 static volatile uint32_t s_error_event_count;
 static volatile uint32_t s_last_error_flags;
+static volatile uint32_t s_error_flags_seen;
 static volatile uint32_t s_state_change_count;
 static volatile uint32_t s_last_old_state;
 static volatile uint32_t s_last_new_state;
+static volatile uint32_t s_state_entry_count[4];
 static volatile uint32_t s_tx_failure_count;
 static volatile uint32_t s_last_tx_failure_id;
 
@@ -92,6 +94,7 @@ static bool twai_error_callback(twai_node_handle_t handle, const twai_error_even
     (void)user_ctx;
     s_error_event_count++;
     s_last_error_flags = edata->err_flags.val;
+    s_error_flags_seen |= edata->err_flags.val;
     return false;
 }
 
@@ -102,7 +105,81 @@ static bool twai_state_change_callback(twai_node_handle_t handle, const twai_sta
     s_state_change_count++;
     s_last_old_state = (uint32_t)edata->old_sta;
     s_last_new_state = (uint32_t)edata->new_sta;
+    if ((uint32_t)edata->new_sta < 4U) {
+        s_state_entry_count[(uint32_t)edata->new_sta]++;
+    }
     return false;
+}
+
+static const char *twai_state_name_short(uint32_t state)
+{
+    switch ((twai_error_state_t)state) {
+    case TWAI_ERROR_ACTIVE:
+        return "act";
+    case TWAI_ERROR_WARNING:
+        return "warn";
+    case TWAI_ERROR_PASSIVE:
+        return "pass";
+    case TWAI_ERROR_BUS_OFF:
+        return "off";
+    default:
+        return "?";
+    }
+}
+
+static void append_flag_name(char *buf, size_t buf_len, size_t *pos, const char *name)
+{
+    if (!buf || !pos || !name || *pos >= buf_len - 1) {
+        return;
+    }
+
+    int len = snprintf(buf + *pos, buf_len - *pos, "%s%s", *pos > 0 ? "|" : "", name);
+    if (len < 0) {
+        return;
+    }
+
+    size_t written = (size_t)len;
+    if (written >= buf_len - *pos) {
+        *pos = buf_len - 1;
+        return;
+    }
+
+    *pos += written;
+}
+
+static void format_error_flags(uint32_t flags, char *buf, size_t buf_len)
+{
+    size_t pos = 0;
+
+    if (!buf || buf_len == 0) {
+        return;
+    }
+
+    buf[0] = '\0';
+    if (flags == 0) {
+        snprintf(buf, buf_len, "unknown");
+        return;
+    }
+
+    if (flags & BIT(0)) {
+        append_flag_name(buf, buf_len, &pos, "arb");
+    }
+    if (flags & BIT(1)) {
+        append_flag_name(buf, buf_len, &pos, "bit");
+    }
+    if (flags & BIT(2)) {
+        append_flag_name(buf, buf_len, &pos, "form");
+    }
+    if (flags & BIT(3)) {
+        append_flag_name(buf, buf_len, &pos, "stuff");
+    }
+    if (flags & BIT(4)) {
+        append_flag_name(buf, buf_len, &pos, "ack");
+    }
+
+    if (pos == 0) {
+        snprintf(buf, buf_len, "other");
+    }
 }
 
 static void process_rx_message(const meb_can_rx_message_t *msg)
@@ -138,6 +215,10 @@ static void report_isr_diagnostics(void)
     static uint32_t last_error_event_count;
     static uint32_t last_state_change_count;
     static uint32_t last_tx_failure_count;
+    static uint32_t last_state_entry_count[4];
+
+    twai_node_status_t node_status = {0};
+    bool have_node_status = s_twai_node && twai_node_get_info(s_twai_node, &node_status, NULL) == ESP_OK;
 
     uint32_t overflow_count = s_rx_queue_overflow_count;
     if (overflow_count != last_overflow_count) {
@@ -151,9 +232,31 @@ static void report_isr_diagnostics(void)
     if (error_event_count != last_error_event_count) {
         uint32_t errors = error_event_count - last_error_event_count;
         uint32_t last_flags = s_last_error_flags;
+        uint32_t flags_seen = s_error_flags_seen;
+        char flag_names[24];
         last_error_event_count = error_event_count;
-        ESP_LOGW(TAG, "TWAI errors=%" PRIu32 " last_flags=0x%" PRIX32, errors, last_flags);
-        meb_diag_record_eventf("can", "error", "count=%" PRIu32 " flags=0x%" PRIX32, errors, last_flags);
+        s_error_flags_seen = 0;
+        format_error_flags(flags_seen, flag_names, sizeof(flag_names));
+
+        if (have_node_status) {
+            ESP_LOGW(TAG, "TWAI errors=%" PRIu32 " flags=0x%" PRIX32 " (%s) last=0x%" PRIX32
+                          " cur=%s tec=%u rec=%u",
+                     errors, flags_seen, flag_names, last_flags,
+                     twai_state_name_short((uint32_t)node_status.state),
+                     (unsigned)node_status.tx_error_count,
+                     (unsigned)node_status.rx_error_count);
+            meb_diag_record_eventf("can", "error",
+                                   "n=%" PRIu32 " f=0x%" PRIX32 "(%s) s=%s tec=%u rec=%u",
+                                   errors, flags_seen, flag_names,
+                                   twai_state_name_short((uint32_t)node_status.state),
+                                   (unsigned)node_status.tx_error_count,
+                                   (unsigned)node_status.rx_error_count);
+        } else {
+            ESP_LOGW(TAG, "TWAI errors=%" PRIu32 " flags=0x%" PRIX32 " (%s) last=0x%" PRIX32,
+                     errors, flags_seen, flag_names, last_flags);
+            meb_diag_record_eventf("can", "error", "n=%" PRIu32 " f=0x%" PRIX32 "(%s)",
+                                   errors, flags_seen, flag_names);
+        }
     }
 
     uint32_t state_change_count = s_state_change_count;
@@ -161,9 +264,46 @@ static void report_isr_diagnostics(void)
         uint32_t changes = state_change_count - last_state_change_count;
         uint32_t old_state = s_last_old_state;
         uint32_t new_state = s_last_new_state;
+        uint32_t active_entries = s_state_entry_count[TWAI_ERROR_ACTIVE] - last_state_entry_count[TWAI_ERROR_ACTIVE];
+        uint32_t warning_entries = s_state_entry_count[TWAI_ERROR_WARNING] - last_state_entry_count[TWAI_ERROR_WARNING];
+        uint32_t passive_entries = s_state_entry_count[TWAI_ERROR_PASSIVE] - last_state_entry_count[TWAI_ERROR_PASSIVE];
+        uint32_t bus_off_entries = s_state_entry_count[TWAI_ERROR_BUS_OFF] - last_state_entry_count[TWAI_ERROR_BUS_OFF];
         last_state_change_count = state_change_count;
-        ESP_LOGW(TAG, "TWAI state changes=%" PRIu32 " last=%" PRIu32 "->%" PRIu32, changes, old_state, new_state);
-        meb_diag_record_eventf("can", "state", "count=%" PRIu32 " %u->%u", changes, old_state, new_state);
+        last_state_entry_count[TWAI_ERROR_ACTIVE] = s_state_entry_count[TWAI_ERROR_ACTIVE];
+        last_state_entry_count[TWAI_ERROR_WARNING] = s_state_entry_count[TWAI_ERROR_WARNING];
+        last_state_entry_count[TWAI_ERROR_PASSIVE] = s_state_entry_count[TWAI_ERROR_PASSIVE];
+        last_state_entry_count[TWAI_ERROR_BUS_OFF] = s_state_entry_count[TWAI_ERROR_BUS_OFF];
+
+        if (have_node_status) {
+            ESP_LOGW(TAG, "TWAI state changes=%" PRIu32 " last=%s->%s enter[a=%" PRIu32 " w=%" PRIu32
+                          " p=%" PRIu32 " b=%" PRIu32 "] cur=%s",
+                     changes,
+                     twai_state_name_short(old_state),
+                     twai_state_name_short(new_state),
+                     active_entries, warning_entries, passive_entries, bus_off_entries,
+                     twai_state_name_short((uint32_t)node_status.state));
+            meb_diag_record_eventf("can", "state",
+                                   "n=%" PRIu32 " %s>%s a=%" PRIu32 " w=%" PRIu32 " p=%" PRIu32 " b=%" PRIu32
+                                   " c=%s",
+                                   changes,
+                                   twai_state_name_short(old_state),
+                                   twai_state_name_short(new_state),
+                                   active_entries, warning_entries, passive_entries, bus_off_entries,
+                                   twai_state_name_short((uint32_t)node_status.state));
+        } else {
+            ESP_LOGW(TAG, "TWAI state changes=%" PRIu32 " last=%s->%s enter[a=%" PRIu32 " w=%" PRIu32
+                          " p=%" PRIu32 " b=%" PRIu32 "]",
+                     changes,
+                     twai_state_name_short(old_state),
+                     twai_state_name_short(new_state),
+                     active_entries, warning_entries, passive_entries, bus_off_entries);
+            meb_diag_record_eventf("can", "state",
+                                   "n=%" PRIu32 " %s>%s a=%" PRIu32 " w=%" PRIu32 " p=%" PRIu32 " b=%" PRIu32,
+                                   changes,
+                                   twai_state_name_short(old_state),
+                                   twai_state_name_short(new_state),
+                                   active_entries, warning_entries, passive_entries, bus_off_entries);
+        }
     }
 
     uint32_t tx_failure_count = s_tx_failure_count;
