@@ -22,8 +22,9 @@ SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 DEFAULT_BUILD_DIR = "build-production"
 DEFAULT_RELEASE_DIR = "release"
 DEFAULT_REMOTE = "origin"
+APP_IMAGE = Path("meb-preheat.bin")
 REQUIRED_ARTIFACTS = (
-    Path("meb-preheat.bin"),
+    APP_IMAGE,
     Path("bootloader/bootloader.bin"),
     Path("partition_table/partition-table.bin"),
     Path("ota_data_initial.bin"),
@@ -39,6 +40,13 @@ OPTIONAL_ARTIFACTS = (
     Path("otadata-flash_args"),
     Path("project_description.json"),
     Path("bootloader/project_description.json"),
+)
+APP_IMAGE_REFERENCES = (
+    Path("flash_args"),
+    Path("flash_project_args"),
+    Path("flash_app_args"),
+    Path("app-flash_args"),
+    Path("flasher_args.json"),
 )
 
 
@@ -305,8 +313,27 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def copy_artifacts(build_dir: Path, release_dir: Path) -> list[dict[str, object]]:
+def release_artifact_path(relative: Path, version: str) -> Path:
+    if relative == APP_IMAGE:
+        return Path(f"meb-preheat-{version}.bin")
+    return relative
+
+
+def copy_artifact(source: Path, destination: Path, relative: Path, app_image_name: str) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    if relative in APP_IMAGE_REFERENCES:
+        text = source.read_text(encoding="utf-8")
+        destination.write_text(text.replace(APP_IMAGE.name, app_image_name), encoding="utf-8")
+        shutil.copystat(source, destination)
+        return
+
+    shutil.copy2(source, destination)
+
+
+def copy_artifacts(build_dir: Path, release_dir: Path, version: str) -> list[dict[str, object]]:
     artifacts: list[dict[str, object]] = []
+    app_image_name = release_artifact_path(APP_IMAGE, version).name
 
     for relative in REQUIRED_ARTIFACTS:
         source = build_dir / relative
@@ -318,12 +345,12 @@ def copy_artifacts(build_dir: Path, release_dir: Path) -> list[dict[str, object]
         if not source.is_file():
             continue
 
-        destination = release_dir / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination)
+        release_relative = release_artifact_path(relative, version)
+        destination = release_dir / release_relative
+        copy_artifact(source, destination, relative, app_image_name)
         artifacts.append(
             {
-                "path": relative.as_posix(),
+                "path": release_relative.as_posix(),
                 "size": destination.stat().st_size,
                 "sha256": sha256_file(destination),
             }
@@ -421,7 +448,7 @@ def write_release_notes(
             "python -m esptool --chip esp32c5 -b 460800 --before default-reset --after hard-reset --port COM4 write_flash \"@flash_args\"",
             "```",
             "",
-            "Adjust the serial port for the target machine. For OTA updates, use `meb-preheat.bin` with `scripts/meb_ota_update.py`.",
+            f"Adjust the serial port for the target machine. For OTA updates, use `meb-preheat-{version}.bin` with `scripts/meb_ota_update.py`.",
             "",
         ]
     )
@@ -521,7 +548,7 @@ def main() -> int:
     build_firmware(root, args.build_dir, args.sdkconfig, args.build_command)
 
     release_dir.mkdir(parents=True)
-    artifacts = copy_artifacts(build_dir, release_dir)
+    artifacts = copy_artifacts(build_dir, release_dir, version)
     write_checksums(release_dir, artifacts)
     write_manifest(
         release_dir,
@@ -545,7 +572,7 @@ def main() -> int:
 
     print()
     print(f"Release package created: {release_dir}")
-    print(f"Firmware image: {release_dir / 'meb-preheat.bin'}")
+    print(f"Firmware image: {release_dir / release_artifact_path(APP_IMAGE, version)}")
     print(f"Release notes: {release_dir / 'RELEASE_NOTES.md'}")
     return 0
 
