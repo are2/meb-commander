@@ -282,32 +282,66 @@ static void format_auto_off_remaining(const meb_state_snapshot_t *state, char *b
     }
 }
 
+static void format_u8_or_null(bool valid, uint8_t value, char *buf, size_t buf_len)
+{
+    if (valid) {
+        snprintf(buf, buf_len, "%u", (unsigned)value);
+    } else {
+        snprintf(buf, buf_len, "null");
+    }
+}
+
+static void format_double_or_null(bool valid, double value, char *buf, size_t buf_len)
+{
+    if (valid) {
+        snprintf(buf, buf_len, "%.1f", value);
+    } else {
+        snprintf(buf, buf_len, "null");
+    }
+}
+
 static void send_heating_state_result(bool has_id, const char *id_token)
 {
     meb_state_snapshot_t state;
     meb_state_get_snapshot(&state);
     char remaining_minutes[16];
     char bms_soc_percent[16];
+    char heating_active[16];
+    char heating_request[16];
+    char cooling_request[16];
+    char heating_power_w[16];
+    char heating_power_req_w[16];
+    char temperature_status[16];
+
     format_auto_off_remaining(&state, remaining_minutes, sizeof(remaining_minutes));
-    if (state.bms_soc_valid) {
-        snprintf(bms_soc_percent, sizeof(bms_soc_percent), "%.1f", state.bms_soc_percent);
-    } else {
-        snprintf(bms_soc_percent, sizeof(bms_soc_percent), "null");
-    }
+    format_double_or_null(state.bms_soc_valid, state.bms_soc_percent,
+                          bms_soc_percent, sizeof(bms_soc_percent));
+    format_u8_or_null(state.heating_status_valid, state.battery_heating_active,
+                      heating_active, sizeof(heating_active));
+    format_u8_or_null(state.heating_status_valid, state.heating_request,
+                      heating_request, sizeof(heating_request));
+    format_u8_or_null(state.heating_status_valid, state.cooling_request,
+                      cooling_request, sizeof(cooling_request));
+    format_u8_or_null(state.heating_status_valid, state.power_battery_heating_watt,
+                      heating_power_w, sizeof(heating_power_w));
+    format_u8_or_null(state.heating_status_valid, state.power_battery_heating_req_watt,
+                      heating_power_req_w, sizeof(heating_power_req_w));
+    format_u8_or_null(state.temperature_status_valid, state.temperature_status_charge,
+                      temperature_status, sizeof(temperature_status));
 
     send_rpc_result(has_id, id_token,
-                    "{\"heating_enabled\":%s,\"active\":%u,\"request\":%u,\"cooling_request\":%u,"
-                    "\"power_w\":%u,\"power_req_w\":%u,\"temperature_status\":%u,"
+                    "{\"heating_enabled\":%s,\"active\":%s,\"request\":%s,\"cooling_request\":%s,"
+                    "\"power_w\":%s,\"power_req_w\":%s,\"temperature_status\":%s,"
                     "\"soc_bms_percent\":%s,"
                     "\"auto_off_timer_enabled\":%s,\"auto_off_timer_minutes\":%" PRIu32 ","
                     "\"auto_off_remaining_minutes\":%s}",
                     state.heating_enabled ? "true" : "false",
-                    state.battery_heating_active,
-                    state.heating_request,
-                    state.cooling_request,
-                    state.power_battery_heating_watt,
-                    state.power_battery_heating_req_watt,
-                    state.temperature_status_charge,
+                    heating_active,
+                    heating_request,
+                    cooling_request,
+                    heating_power_w,
+                    heating_power_req_w,
+                    temperature_status,
                     bms_soc_percent,
                     state.auto_off_timer_enabled ? "true" : "false",
                     state.auto_off_timer_minutes,

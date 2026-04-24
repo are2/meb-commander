@@ -141,8 +141,10 @@ Supported methods:
 
 JSON-RPC success response examples:
 
+Heating response fields sourced from car CAN (`active`, `request`, `cooling_request`, `power_w`, `power_req_w`, `temperature_status`, and `soc_bms_percent`) are JSON `null` until their matching frame has been received at least once.
+
 ```json
-{"jsonrpc":"2.0","id":1,"result":{"heating_enabled":true,"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0,"temperature_status":1,"soc_bms_percent":50.0,"auto_off_timer_enabled":false,"auto_off_timer_minutes":0,"auto_off_remaining_minutes":180}}
+{"jsonrpc":"2.0","id":1,"result":{"heating_enabled":true,"active":null,"request":null,"cooling_request":null,"power_w":null,"power_req_w":null,"temperature_status":null,"soc_bms_percent":null,"auto_off_timer_enabled":false,"auto_off_timer_minutes":0,"auto_off_remaining_minutes":180}}
 {"jsonrpc":"2.0","id":2,"result":{"heating_enabled":true,"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0,"temperature_status":1,"soc_bms_percent":50.0,"auto_off_timer_enabled":false,"auto_off_timer_minutes":0,"auto_off_remaining_minutes":180}}
 {"jsonrpc":"2.0","id":3,"result":{"version":"0.4.0","about":"MEB preheat CAN controller","protocol_version":2,"release_build":false,"build_mode":"development","serial":{"uart":0,"baud_rate":115200,"tx_gpio":11,"rx_gpio":12},"ble":{"name":"MEB-Preheat","service_uuid":"7e57c000-f8aa-4a1f-9af3-9c0b7fd90e00","rx_uuid":"7e57c001-f8aa-4a1f-9af3-9c0b7fd90e00","tx_uuid":"7e57c002-f8aa-4a1f-9af3-9c0b7fd90e00"},"telemetry_interval_ms":1000,"heating":{"safety_auto_off_enabled":true,"safety_auto_off_minutes":180},"can":{"tx_gpio":4,"rx_gpio":5,"bitrate":500000,"data_bitrate":2000000}}}
 {"jsonrpc":"2.0","id":4,"result":{"uptime_ms":123456,"reset":{"reason":1,"name":"poweron"}}}
@@ -150,7 +152,7 @@ JSON-RPC success response examples:
 {"jsonrpc":"2.0","id":6,"result":{"uptime_ms":123456,"reset":{"reason":1,"name":"poweron"},"heap":{"free":210000,"minimum_free":198000,"free_8bit":210000,"minimum_free_8bit":198000,"largest_free_8bit_block":120000},"event_log":{"capacity":16,"count":1,"returned":1,"overwritten":0,"events":[{"seq":1,"ts_ms":8,"c":"system","e":"boot","d":"reset=poweron","heap":226000,"min_heap":226000}]}}}
 {"jsonrpc":"2.0","id":7,"result":{"capacity":16,"count":1,"returned":1,"overwritten":0,"events":[{"seq":1,"ts_ms":8,"c":"system","e":"boot","d":"reset=poweron","heap":226000,"min_heap":226000}]}}
 {"jsonrpc":"2.0","id":8,"result":{"interval_ms":1000}}
-{"jsonrpc":"2.0","id":9,"result":{"heating_enabled":true,"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0,"temperature_status":1,"auto_off_timer_enabled":true,"auto_off_timer_minutes":30,"auto_off_remaining_minutes":30}}
+{"jsonrpc":"2.0","id":9,"result":{"heating_enabled":true,"active":null,"request":null,"cooling_request":null,"power_w":null,"power_req_w":null,"temperature_status":null,"soc_bms_percent":null,"auto_off_timer_enabled":true,"auto_off_timer_minutes":30,"auto_off_remaining_minutes":30}}
 ```
 
 JSON-RPC error response example:
@@ -264,10 +266,12 @@ python scripts\meb_ble_client.py --disable
 
 The firmware also emits versioned NDJSON events. These are not JSON-RPC responses, so host software should dispatch them by `type`.
 
+CAN-derived values are emitted as JSON `null` until the matching car CAN frame has been received at least once. After that first valid frame, the latest value is emitted as a number.
+
 Telemetry event:
 
 ```json
-{"v":2,"type":"telemetry","ts_ms":123456,"battery":{"soc_bms_percent":50.0},"heating":{"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0},"thermal":{"status":0},"predicted":{"power_kw":0.0,"current_a":0.0},"battery_temp_c":{"min":0.0,"max":0.0},"control":{"heating_enabled":false,"auto_off_timer_minutes":0,"auto_off_remaining_minutes":null}}
+{"v":2,"type":"telemetry","ts_ms":123456,"battery":{"soc_bms_percent":null},"heating":{"active":null,"request":null,"cooling_request":null,"power_w":null,"power_req_w":null},"thermal":{"status":null},"predicted":{"power_kw":null,"current_a":null},"battery_temp_c":{"min":null,"max":null},"control":{"heating_enabled":false,"auto_off_timer_minutes":0,"auto_off_remaining_minutes":null}}
 ```
 
 Other events:

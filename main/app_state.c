@@ -230,6 +230,7 @@ void meb_state_update_heating_status(const uint8_t *data, uint16_t len)
     }
 
     lock_state();
+    s_state.heating_status_valid = true;
     s_state.battery_heating_active = (data[4] & 0x40) >> 6;
     s_state.heating_request = (data[5] & 0xE0) >> 5;
     s_state.cooling_request = (data[5] & 0x1C) >> 2;
@@ -245,6 +246,7 @@ void meb_state_update_charging_optimization(const uint8_t *data, uint16_t len)
     }
 
     lock_state();
+    s_state.temperature_status_valid = true;
     s_state.temperature_status_charge = (((data[2] & 0x03) << 1) | (data[1] >> 7));
     unlock_state();
 }
@@ -256,6 +258,7 @@ void meb_state_update_dynamic(const uint8_t *data, uint16_t len)
     }
 
     lock_state();
+    s_state.charge_limits_valid = true;
     s_state.max_charge_power_kw = ((data[7] << 5) | (data[6] >> 3)) * 0.1;
     s_state.max_charge_current_amp = (((data[4] & 0x3F) << 7) | (data[3] >> 1)) * 0.2;
     unlock_state();
@@ -268,6 +271,7 @@ void meb_state_update_temperature(const uint8_t *data, uint16_t len)
     }
 
     lock_state();
+    s_state.battery_temperature_valid = true;
     s_state.battery_max_temp = data[3] * 0.5 - 40.0;
     s_state.battery_min_temp = data[4] * 0.5 - 40.0;
     unlock_state();

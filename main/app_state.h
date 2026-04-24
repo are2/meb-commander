@@ -5,14 +5,18 @@
 #include "esp_err.h"
 
 typedef struct {
+    bool heating_status_valid;
     uint8_t battery_heating_active;
     uint8_t heating_request;
     uint8_t cooling_request;
     uint8_t power_battery_heating_watt;
     uint8_t power_battery_heating_req_watt;
+    bool temperature_status_valid;
     uint8_t temperature_status_charge;
+    bool charge_limits_valid;
     double max_charge_power_kw;
     double max_charge_current_amp;
+    bool battery_temperature_valid;
     double battery_min_temp;
     double battery_max_temp;
     bool bms_soc_valid;

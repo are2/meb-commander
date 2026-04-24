@@ -47,6 +47,33 @@ esp_err_t meb_control_set_telemetry_interval_ms(uint32_t interval_ms)
     return ESP_OK;
 }
 
+static void format_u8_or_null(bool valid, uint8_t value, char *buf, size_t buf_len)
+{
+    if (valid) {
+        snprintf(buf, buf_len, "%u", (unsigned)value);
+    } else {
+        snprintf(buf, buf_len, "null");
+    }
+}
+
+static void format_u32_or_null(bool valid, uint32_t value, char *buf, size_t buf_len)
+{
+    if (valid) {
+        snprintf(buf, buf_len, "%" PRIu32, value);
+    } else {
+        snprintf(buf, buf_len, "null");
+    }
+}
+
+static void format_double_or_null(bool valid, double value, char *buf, size_t buf_len)
+{
+    if (valid) {
+        snprintf(buf, buf_len, "%.1f", value);
+    } else {
+        snprintf(buf, buf_len, "null");
+    }
+}
+
 static void control_task(void *arg)
 {
     (void)arg;
@@ -65,7 +92,8 @@ static void control_task(void *arg)
         meb_state_snapshot_t state;
         meb_state_get_snapshot(&state);
 
-        if (state.heating_enabled && state.temperature_status_charge == MEB_TEMPERATURE_STATUS_UNDER_OPTIMAL) {
+        if (state.heating_enabled && state.temperature_status_valid &&
+            state.temperature_status_charge == MEB_TEMPERATURE_STATUS_UNDER_OPTIMAL) {
             if (meb_state_take_session_error()) {
                 meb_diag_record_event("control", "diag_session_retry", "");
                 meb_serial_printf("{\"v\":%d,\"type\":\"control.diag_session_retry\"}\n", MEB_PREHEATER_PROTOCOL_VERSION);
@@ -97,18 +125,41 @@ static void telemetry_task(void *arg)
         meb_state_get_snapshot(&state);
         char remaining_minutes[16];
         char bms_soc_percent[16];
+        char heating_active[16];
+        char heating_request[16];
+        char cooling_request[16];
+        char heating_power_w[16];
+        char heating_power_req_w[16];
+        char temperature_status[16];
+        char max_charge_power_kw[16];
+        char max_charge_current_a[16];
+        char battery_min_temp_c[16];
+        char battery_max_temp_c[16];
 
-        if (state.auto_off_remaining_valid) {
-            snprintf(remaining_minutes, sizeof(remaining_minutes), "%" PRIu32, state.auto_off_remaining_minutes);
-        } else {
-            snprintf(remaining_minutes, sizeof(remaining_minutes), "null");
-        }
-
-        if (state.bms_soc_valid) {
-            snprintf(bms_soc_percent, sizeof(bms_soc_percent), "%.1f", state.bms_soc_percent);
-        } else {
-            snprintf(bms_soc_percent, sizeof(bms_soc_percent), "null");
-        }
+        format_u32_or_null(state.auto_off_remaining_valid, state.auto_off_remaining_minutes,
+                           remaining_minutes, sizeof(remaining_minutes));
+        format_double_or_null(state.bms_soc_valid, state.bms_soc_percent,
+                              bms_soc_percent, sizeof(bms_soc_percent));
+        format_u8_or_null(state.heating_status_valid, state.battery_heating_active,
+                          heating_active, sizeof(heating_active));
+        format_u8_or_null(state.heating_status_valid, state.heating_request,
+                          heating_request, sizeof(heating_request));
+        format_u8_or_null(state.heating_status_valid, state.cooling_request,
+                          cooling_request, sizeof(cooling_request));
+        format_u8_or_null(state.heating_status_valid, state.power_battery_heating_watt,
+                          heating_power_w, sizeof(heating_power_w));
+        format_u8_or_null(state.heating_status_valid, state.power_battery_heating_req_watt,
+                          heating_power_req_w, sizeof(heating_power_req_w));
+        format_u8_or_null(state.temperature_status_valid, state.temperature_status_charge,
+                          temperature_status, sizeof(temperature_status));
+        format_double_or_null(state.charge_limits_valid, state.max_charge_power_kw,
+                              max_charge_power_kw, sizeof(max_charge_power_kw));
+        format_double_or_null(state.charge_limits_valid, state.max_charge_current_amp,
+                              max_charge_current_a, sizeof(max_charge_current_a));
+        format_double_or_null(state.battery_temperature_valid, state.battery_min_temp,
+                              battery_min_temp_c, sizeof(battery_min_temp_c));
+        format_double_or_null(state.battery_temperature_valid, state.battery_max_temp,
+                              battery_max_temp_c, sizeof(battery_max_temp_c));
 
         meb_serial_printf("{"
                           "\"v\":%d,"
@@ -118,22 +169,22 @@ static void telemetry_task(void *arg)
                               "\"soc_bms_percent\":%s"
                           "},"
                           "\"heating\":{"
-                              "\"active\":%u,"
-                              "\"request\":%u,"
-                              "\"cooling_request\":%u,"
-                              "\"power_w\":%u,"
-                              "\"power_req_w\":%u"
+                              "\"active\":%s,"
+                              "\"request\":%s,"
+                              "\"cooling_request\":%s,"
+                              "\"power_w\":%s,"
+                              "\"power_req_w\":%s"
                           "},"
                           "\"thermal\":{"
-                              "\"status\":%u"
+                              "\"status\":%s"
                           "},"
                           "\"predicted\":{"
-                              "\"power_kw\":%.1f,"
-                              "\"current_a\":%.1f"
+                              "\"power_kw\":%s,"
+                              "\"current_a\":%s"
                           "},"
                           "\"battery_temp_c\":{"
-                              "\"min\":%.1f,"
-                              "\"max\":%.1f"
+                              "\"min\":%s,"
+                              "\"max\":%s"
                           "},"
                           "\"control\":{"
                               "\"heating_enabled\":%s,"
@@ -144,16 +195,16 @@ static void telemetry_task(void *arg)
                           MEB_PREHEATER_PROTOCOL_VERSION,
                           (unsigned long long)(esp_timer_get_time() / 1000ULL),
                           bms_soc_percent,
-                          state.battery_heating_active,
-                          state.heating_request,
-                          state.cooling_request,
-                          state.power_battery_heating_watt,
-                          state.power_battery_heating_req_watt,
-                          state.temperature_status_charge,
-                          state.max_charge_power_kw,
-                          state.max_charge_current_amp,
-                          state.battery_min_temp,
-                          state.battery_max_temp,
+                          heating_active,
+                          heating_request,
+                          cooling_request,
+                          heating_power_w,
+                          heating_power_req_w,
+                          temperature_status,
+                          max_charge_power_kw,
+                          max_charge_current_a,
+                          battery_min_temp_c,
+                          battery_max_temp_c,
                           state.heating_enabled ? "true" : "false",
                           state.auto_off_timer_minutes,
                           remaining_minutes);
