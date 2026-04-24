@@ -89,14 +89,14 @@ void meb_state_get_snapshot(meb_state_snapshot_t *snapshot)
     lock_state();
     *snapshot = s_state;
     snapshot->auto_off_timer_enabled = s_state.auto_off_timer_minutes > 0;
-    snapshot->auto_off_remaining_valid = false;
-    snapshot->auto_off_remaining_minutes = 0;
+    snapshot->auto_off_remaining_minutes.valid = false;
+    snapshot->auto_off_remaining_minutes.value = 0;
 
     int64_t deadline_us = effective_auto_off_deadline_locked();
     if (s_state.heating_enabled && deadline_us > 0) {
         int64_t remaining_us = deadline_us - esp_timer_get_time();
-        snapshot->auto_off_remaining_valid = true;
-        snapshot->auto_off_remaining_minutes = remaining_minutes_ceil(remaining_us);
+        snapshot->auto_off_remaining_minutes.valid = true;
+        snapshot->auto_off_remaining_minutes.value = remaining_minutes_ceil(remaining_us);
     }
     unlock_state();
 }
@@ -208,8 +208,8 @@ void meb_state_update_diag_response(const uint8_t *data, uint16_t len)
     if (len >= 5 && data[0] == 0x04 && data[1] == 0x62 && data[2] == 0x02 && data[3] == 0x8C) {
         if (data[4] <= 250) {
             lock_state();
-            s_state.bms_soc_valid = true;
-            s_state.bms_soc_percent = data[4] / 2.5;
+            s_state.bms_soc_percent.valid = true;
+            s_state.bms_soc_percent.value = data[4] / 2.5;
             unlock_state();
         }
         return;
@@ -230,12 +230,12 @@ void meb_state_update_heating_status(const uint8_t *data, uint16_t len)
     }
 
     lock_state();
-    s_state.heating_status_valid = true;
-    s_state.battery_heating_active = (data[4] & 0x40) >> 6;
-    s_state.heating_request = (data[5] & 0xE0) >> 5;
-    s_state.cooling_request = (data[5] & 0x1C) >> 2;
-    s_state.power_battery_heating_watt = data[6];
-    s_state.power_battery_heating_req_watt = data[7];
+    s_state.heating_status.valid = true;
+    s_state.heating_status.active = (data[4] & 0x40) >> 6;
+    s_state.heating_status.request = (data[5] & 0xE0) >> 5;
+    s_state.heating_status.cooling_request = (data[5] & 0x1C) >> 2;
+    s_state.heating_status.power_w = data[6];
+    s_state.heating_status.power_req_w = data[7];
     unlock_state();
 }
 
@@ -246,8 +246,8 @@ void meb_state_update_charging_optimization(const uint8_t *data, uint16_t len)
     }
 
     lock_state();
-    s_state.temperature_status_valid = true;
-    s_state.temperature_status_charge = (((data[2] & 0x03) << 1) | (data[1] >> 7));
+    s_state.temperature_status_charge.valid = true;
+    s_state.temperature_status_charge.value = (((data[2] & 0x03) << 1) | (data[1] >> 7));
     unlock_state();
 }
 
@@ -258,9 +258,9 @@ void meb_state_update_dynamic(const uint8_t *data, uint16_t len)
     }
 
     lock_state();
-    s_state.charge_limits_valid = true;
-    s_state.max_charge_power_kw = ((data[7] << 5) | (data[6] >> 3)) * 0.1;
-    s_state.max_charge_current_amp = (((data[4] & 0x3F) << 7) | (data[3] >> 1)) * 0.2;
+    s_state.charge_limits.valid = true;
+    s_state.charge_limits.power_kw = ((data[7] << 5) | (data[6] >> 3)) * 0.1;
+    s_state.charge_limits.current_a = (((data[4] & 0x3F) << 7) | (data[3] >> 1)) * 0.2;
     unlock_state();
 }
 
@@ -271,8 +271,8 @@ void meb_state_update_temperature(const uint8_t *data, uint16_t len)
     }
 
     lock_state();
-    s_state.battery_temperature_valid = true;
-    s_state.battery_max_temp = data[3] * 0.5 - 40.0;
-    s_state.battery_min_temp = data[4] * 0.5 - 40.0;
+    s_state.battery_temperature.valid = true;
+    s_state.battery_temperature.max_c = data[3] * 0.5 - 40.0;
+    s_state.battery_temperature.min_c = data[4] * 0.5 - 40.0;
     unlock_state();
 }

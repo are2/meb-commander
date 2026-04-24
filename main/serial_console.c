@@ -275,8 +275,8 @@ static void send_rpc_result(bool has_id, const char *id_token, const char *resul
 
 static void format_auto_off_remaining(const meb_state_snapshot_t *state, char *buf, size_t buf_len)
 {
-    if (state->auto_off_remaining_valid) {
-        snprintf(buf, buf_len, "%" PRIu32, state->auto_off_remaining_minutes);
+    if (state->auto_off_remaining_minutes.valid) {
+        snprintf(buf, buf_len, "%" PRIu32, state->auto_off_remaining_minutes.value);
     } else {
         snprintf(buf, buf_len, "null");
     }
@@ -314,19 +314,20 @@ static void send_heating_state_result(bool has_id, const char *id_token)
     char temperature_status[16];
 
     format_auto_off_remaining(&state, remaining_minutes, sizeof(remaining_minutes));
-    format_double_or_null(state.bms_soc_valid, state.bms_soc_percent,
+    format_double_or_null(state.bms_soc_percent.valid, state.bms_soc_percent.value,
                           bms_soc_percent, sizeof(bms_soc_percent));
-    format_u8_or_null(state.heating_status_valid, state.battery_heating_active,
+    format_u8_or_null(state.heating_status.valid, state.heating_status.active,
                       heating_active, sizeof(heating_active));
-    format_u8_or_null(state.heating_status_valid, state.heating_request,
+    format_u8_or_null(state.heating_status.valid, state.heating_status.request,
                       heating_request, sizeof(heating_request));
-    format_u8_or_null(state.heating_status_valid, state.cooling_request,
+    format_u8_or_null(state.heating_status.valid, state.heating_status.cooling_request,
                       cooling_request, sizeof(cooling_request));
-    format_u8_or_null(state.heating_status_valid, state.power_battery_heating_watt,
+    format_u8_or_null(state.heating_status.valid, state.heating_status.power_w,
                       heating_power_w, sizeof(heating_power_w));
-    format_u8_or_null(state.heating_status_valid, state.power_battery_heating_req_watt,
+    format_u8_or_null(state.heating_status.valid, state.heating_status.power_req_w,
                       heating_power_req_w, sizeof(heating_power_req_w));
-    format_u8_or_null(state.temperature_status_valid, state.temperature_status_charge,
+    format_u8_or_null(state.temperature_status_charge.valid,
+                      state.temperature_status_charge.value,
                       temperature_status, sizeof(temperature_status));
 
     send_rpc_result(has_id, id_token,

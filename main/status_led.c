@@ -48,7 +48,7 @@ static esp_err_t configure_led(void)
 static rgb_t status_color(const meb_state_snapshot_t *state)
 {
     const bool requested = state->heating_enabled;
-    const bool active = state->battery_heating_active != 0;
+    const bool active = state->heating_status.valid && state->heating_status.active != 0;
 
     if (requested && active) {
         return (rgb_t){.red = MEB_LED_BRIGHTNESS, .green = 0, .blue = 0};

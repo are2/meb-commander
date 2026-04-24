@@ -33,7 +33,7 @@
 #define MEB_LED_GPIO GPIO_NUM_27
 #define MEB_LED_COUNT 1
 #define MEB_LED_RMT_RESOLUTION_HZ (10 * 1000 * 1000)
-#define MEB_LED_BRIGHTNESS 16
+#define MEB_LED_BRIGHTNESS 12
 
 // Host UART used for the text/JSON serial console.
 #define MEB_HOST_UART_TX_GPIO GPIO_NUM_11

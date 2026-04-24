@@ -5,28 +5,52 @@
 #include "esp_err.h"
 
 typedef struct {
-    bool heating_status_valid;
-    uint8_t battery_heating_active;
-    uint8_t heating_request;
+    bool valid;
+    uint8_t value;
+} meb_nullable_u8_t;
+
+typedef struct {
+    bool valid;
+    uint32_t value;
+} meb_nullable_u32_t;
+
+typedef struct {
+    bool valid;
+    double value;
+} meb_nullable_double_t;
+
+typedef struct {
+    bool valid;
+    uint8_t active;
+    uint8_t request;
     uint8_t cooling_request;
-    uint8_t power_battery_heating_watt;
-    uint8_t power_battery_heating_req_watt;
-    bool temperature_status_valid;
-    uint8_t temperature_status_charge;
-    bool charge_limits_valid;
-    double max_charge_power_kw;
-    double max_charge_current_amp;
-    bool battery_temperature_valid;
-    double battery_min_temp;
-    double battery_max_temp;
-    bool bms_soc_valid;
-    double bms_soc_percent;
+    uint8_t power_w;
+    uint8_t power_req_w;
+} meb_heating_status_t;
+
+typedef struct {
+    bool valid;
+    double power_kw;
+    double current_a;
+} meb_charge_limits_t;
+
+typedef struct {
+    bool valid;
+    double min_c;
+    double max_c;
+} meb_battery_temperature_t;
+
+typedef struct {
+    meb_heating_status_t heating_status;
+    meb_nullable_u8_t temperature_status_charge;
+    meb_charge_limits_t charge_limits;
+    meb_battery_temperature_t battery_temperature;
+    meb_nullable_double_t bms_soc_percent;
     bool session_error;
     bool heating_enabled;
     bool auto_off_timer_enabled;
     uint32_t auto_off_timer_minutes;
-    bool auto_off_remaining_valid;
-    uint32_t auto_off_remaining_minutes;
+    meb_nullable_u32_t auto_off_remaining_minutes;
 } meb_state_snapshot_t;
 
 typedef enum {
