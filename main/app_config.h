@@ -4,7 +4,7 @@
 #include "sdkconfig.h"
 
 // Firmware metadata exposed through the serial console and BLE API.
-#define MEB_APP_VERSION "0.6.0"
+#define MEB_APP_VERSION "0.6.1"
 #define MEB_APP_ABOUT "MEB preheat CAN controller"
 #define MEB_PREHEATER_PROTOCOL_VERSION 2
 
