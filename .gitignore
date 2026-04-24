@@ -33,3 +33,6 @@ env/
 # OS metadata
 .DS_Store
 Thumbs.db
+scripts/pyvenv.cfg
+scripts/lib
+scripts/bin

@@ -9,6 +9,7 @@ import base64
 import hashlib
 import json
 import sys
+import time
 import traceback
 from pathlib import Path
 from typing import Any, Protocol
@@ -24,6 +25,17 @@ DEFAULT_RAW_CHUNK = 384
 
 class OtaRpcTimeoutError(TimeoutError):
     pass
+
+
+def format_duration(seconds: float) -> str:
+    total_seconds = max(0, int(round(seconds)))
+    minutes, secs = divmod(total_seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours > 0:
+        return f"{hours:d}h{minutes:02d}m{secs:02d}s"
+    if minutes > 0:
+        return f"{minutes:d}m{secs:02d}s"
+    return f"{secs:d}s"
 
 
 class RpcTransport(Protocol):
@@ -90,9 +102,10 @@ class SerialRpcTransport:
 
 
 class BleRpcTransport:
-    def __init__(self, client: Any, write_chunk_size: int) -> None:
+    def __init__(self, client: Any, write_chunk_size: int, write_with_response: bool) -> None:
         self.client = client
         self.write_chunk_size = write_chunk_size
+        self.write_with_response = write_with_response
         self._rx_buffer = bytearray()
         self._next_id = 1
         self._pending: dict[int, asyncio.Future[dict[str, Any]]] = {}
@@ -113,7 +126,11 @@ class BleRpcTransport:
 
         payload = (json.dumps(request, separators=(",", ":")) + "\n").encode("utf-8")
         for offset in range(0, len(payload), self.write_chunk_size):
-            await self.client.write_gatt_char(RX_UUID, payload[offset:offset + self.write_chunk_size], response=True)
+            await self.client.write_gatt_char(
+                RX_UUID,
+                payload[offset:offset + self.write_chunk_size],
+                response=self.write_with_response,
+            )
 
         try:
             return await asyncio.wait_for(future, timeout=timeout)
@@ -178,7 +195,7 @@ async def connect_transport(args: argparse.Namespace) -> RpcTransport:
     target = args.address if args.address else await find_ble_device(args.name, args.scan_timeout)
     client = BleakClient(target)
     await client.connect(timeout=args.connect_timeout)
-    transport = BleRpcTransport(client, args.ble_write_chunk)
+    transport = BleRpcTransport(client, args.ble_write_chunk, args.ble_write_with_response)
     await transport.start()
     return transport
 
@@ -206,6 +223,8 @@ async def update_firmware(transport: RpcTransport, firmware: Path, args: argpars
     if max_raw <= 0:
         raise RuntimeError(f"Device reported invalid chunk limit: {begin!r}")
 
+    start_time = time.perf_counter()
+    chunk_count = 0
     written = int(begin.get("written", 0))
     while written < image_size:
         chunk = image[written:written + max_raw]
@@ -219,13 +238,29 @@ async def update_firmware(transport: RpcTransport, firmware: Path, args: argpars
         except OtaRpcTimeoutError as exc:
             raise OtaRpcTimeoutError(f"{exc} at offset {written}") from exc
         written = int(result["written"])
-        print(f"\rWritten {written}/{image_size} bytes ({written * 100 // image_size}%)", end="", flush=True)
+        chunk_count += 1
+        elapsed = time.perf_counter() - start_time
+        rate_bps = written / elapsed if elapsed > 0 else 0.0
+        remaining_seconds = ((image_size - written) / rate_bps) if rate_bps > 0 else 0.0
+        print(
+            f"\rWritten {written}/{image_size} bytes ({written * 100 // image_size}%) "
+            f"at {rate_bps / 1024:.1f} KiB/s, ETA {format_duration(remaining_seconds)}",
+            end="",
+            flush=True,
+        )
 
     print()
     print("Finalizing OTA image...")
     end = check_rpc_response(await transport.rpc("firmware.end", timeout=args.rpc_timeout))
+    elapsed = time.perf_counter() - start_time
+    rate_bps = image_size / elapsed if elapsed > 0 else 0.0
     print("Update finalized:")
     print(json.dumps(end, indent=2))
+    print(
+        "Transfer stats: "
+        f"{chunk_count} chunks in {elapsed:.2f}s, "
+        f"{rate_bps / 1024:.1f} KiB/s average"
+    )
 
     if args.reboot:
         print("Rebooting device...")
@@ -250,6 +285,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scan-timeout", type=float, default=10.0)
     parser.add_argument("--connect-timeout", type=float, default=10.0)
     parser.add_argument("--ble-write-chunk", type=int, default=180, help="Maximum bytes per BLE GATT write")
+    parser.add_argument(
+        "--ble-write-with-response",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use acknowledged BLE writes for RX fragments; disable with --no-ble-write-with-response",
+    )
     parser.add_argument(
         "--chunk-size",
         type=int,
