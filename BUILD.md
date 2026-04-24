@@ -50,6 +50,21 @@ build-production\meb-preheat.bin
 
 `build-production\` and `sdkconfig.production` are generated files and are ignored by git.
 
+## Firmware Release Package
+
+Use the interactive publish helper from a clean git tree:
+
+```powershell
+python .\scripts\publish_firmware_package.py
+```
+
+The helper asks for the next firmware version, updates `MEB_APP_VERSION`,
+creates a release commit and annotated git tag, pushes the branch and tag,
+runs the production build, and writes a package under `release\<version>\`.
+The package includes the app image for OTA, full-flash artifacts, `flash_args`,
+SHA-256 checksums, a JSON manifest, and release notes generated from git commit
+messages.
+
 Production power settings:
 
 ```text

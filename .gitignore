@@ -30,6 +30,9 @@ env/
 *.swp
 *.swo
 
+# Generated firmware release packages
+release/
+
 # OS metadata
 .DS_Store
 Thumbs.db
