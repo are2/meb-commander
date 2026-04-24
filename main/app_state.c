@@ -12,8 +12,14 @@ static meb_state_snapshot_t s_state;
 static SemaphoreHandle_t s_state_lock;
 static int64_t s_heating_enabled_since_us;
 static int64_t s_user_auto_off_deadline_us;
+static int64_t s_heating_status_seen_us;
+static int64_t s_temperature_status_charge_seen_us;
+static int64_t s_charge_limits_seen_us;
+static int64_t s_battery_temperature_seen_us;
+static int64_t s_bms_soc_percent_seen_us;
 
 #define US_PER_MINUTE (60LL * 1000LL * 1000LL)
+#define MEB_CAN_SIGNAL_STALE_US ((int64_t)MEB_CAN_SIGNAL_STALE_MS * 1000LL)
 
 static void lock_state(void)
 {
@@ -32,6 +38,34 @@ static void unlock_state(void)
 static int64_t minutes_to_us(uint32_t minutes)
 {
     return (int64_t)minutes * US_PER_MINUTE;
+}
+
+static bool can_signal_is_fresh(int64_t now_us, int64_t last_seen_us)
+{
+    return last_seen_us > 0 && (now_us - last_seen_us) < MEB_CAN_SIGNAL_STALE_US;
+}
+
+static void invalidate_stale_can_signals_locked(meb_state_snapshot_t *snapshot, int64_t now_us)
+{
+    if (!can_signal_is_fresh(now_us, s_heating_status_seen_us)) {
+        snapshot->heating_status.valid = false;
+    }
+
+    if (!can_signal_is_fresh(now_us, s_temperature_status_charge_seen_us)) {
+        snapshot->temperature_status_charge.valid = false;
+    }
+
+    if (!can_signal_is_fresh(now_us, s_charge_limits_seen_us)) {
+        snapshot->charge_limits.valid = false;
+    }
+
+    if (!can_signal_is_fresh(now_us, s_battery_temperature_seen_us)) {
+        snapshot->battery_temperature.valid = false;
+    }
+
+    if (!can_signal_is_fresh(now_us, s_bms_soc_percent_seen_us)) {
+        snapshot->bms_soc_percent.valid = false;
+    }
 }
 
 static uint32_t remaining_minutes_ceil(int64_t remaining_us)
@@ -77,6 +111,11 @@ esp_err_t meb_state_init(void)
     s_state.heating_enabled = false;
     s_heating_enabled_since_us = 0;
     s_user_auto_off_deadline_us = 0;
+    s_heating_status_seen_us = 0;
+    s_temperature_status_charge_seen_us = 0;
+    s_charge_limits_seen_us = 0;
+    s_battery_temperature_seen_us = 0;
+    s_bms_soc_percent_seen_us = 0;
     return ESP_OK;
 }
 
@@ -86,15 +125,18 @@ void meb_state_get_snapshot(meb_state_snapshot_t *snapshot)
         return;
     }
 
+    int64_t now_us = esp_timer_get_time();
+
     lock_state();
     *snapshot = s_state;
+    invalidate_stale_can_signals_locked(snapshot, now_us);
     snapshot->auto_off_timer_enabled = s_state.auto_off_timer_minutes > 0;
     snapshot->auto_off_remaining_minutes.valid = false;
     snapshot->auto_off_remaining_minutes.value = 0;
 
     int64_t deadline_us = effective_auto_off_deadline_locked();
     if (s_state.heating_enabled && deadline_us > 0) {
-        int64_t remaining_us = deadline_us - esp_timer_get_time();
+        int64_t remaining_us = deadline_us - now_us;
         snapshot->auto_off_remaining_minutes.valid = true;
         snapshot->auto_off_remaining_minutes.value = remaining_minutes_ceil(remaining_us);
     }
@@ -207,9 +249,12 @@ void meb_state_update_diag_response(const uint8_t *data, uint16_t len)
 
     if (len >= 5 && data[0] == 0x04 && data[1] == 0x62 && data[2] == 0x02 && data[3] == 0x8C) {
         if (data[4] <= 250) {
+            int64_t now_us = esp_timer_get_time();
+
             lock_state();
             s_state.bms_soc_percent.valid = true;
             s_state.bms_soc_percent.value = data[4] / 2.5;
+            s_bms_soc_percent_seen_us = now_us;
             unlock_state();
         }
         return;
@@ -229,6 +274,8 @@ void meb_state_update_heating_status(const uint8_t *data, uint16_t len)
         return;
     }
 
+    int64_t now_us = esp_timer_get_time();
+
     lock_state();
     s_state.heating_status.valid = true;
     s_state.heating_status.active = (data[4] & 0x40) >> 6;
@@ -236,6 +283,7 @@ void meb_state_update_heating_status(const uint8_t *data, uint16_t len)
     s_state.heating_status.cooling_request = (data[5] & 0x1C) >> 2;
     s_state.heating_status.power_w = data[6];
     s_state.heating_status.power_req_w = data[7];
+    s_heating_status_seen_us = now_us;
     unlock_state();
 }
 
@@ -245,9 +293,12 @@ void meb_state_update_charging_optimization(const uint8_t *data, uint16_t len)
         return;
     }
 
+    int64_t now_us = esp_timer_get_time();
+
     lock_state();
     s_state.temperature_status_charge.valid = true;
     s_state.temperature_status_charge.value = (((data[2] & 0x03) << 1) | (data[1] >> 7));
+    s_temperature_status_charge_seen_us = now_us;
     unlock_state();
 }
 
@@ -257,10 +308,13 @@ void meb_state_update_dynamic(const uint8_t *data, uint16_t len)
         return;
     }
 
+    int64_t now_us = esp_timer_get_time();
+
     lock_state();
     s_state.charge_limits.valid = true;
     s_state.charge_limits.power_kw = ((data[7] << 5) | (data[6] >> 3)) * 0.1;
     s_state.charge_limits.current_a = (((data[4] & 0x3F) << 7) | (data[3] >> 1)) * 0.2;
+    s_charge_limits_seen_us = now_us;
     unlock_state();
 }
 
@@ -270,9 +324,12 @@ void meb_state_update_temperature(const uint8_t *data, uint16_t len)
         return;
     }
 
+    int64_t now_us = esp_timer_get_time();
+
     lock_state();
     s_state.battery_temperature.valid = true;
     s_state.battery_temperature.max_c = data[3] * 0.5 - 40.0;
     s_state.battery_temperature.min_c = data[4] * 0.5 - 40.0;
+    s_battery_temperature_seen_us = now_us;
     unlock_state();
 }

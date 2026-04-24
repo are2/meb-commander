@@ -4,7 +4,7 @@
 #include "sdkconfig.h"
 
 // Firmware metadata exposed through the serial console and BLE API.
-#define MEB_APP_VERSION "0.5.3"
+#define MEB_APP_VERSION "0.6.0"
 #define MEB_APP_ABOUT "MEB preheat CAN controller"
 #define MEB_PREHEATER_PROTOCOL_VERSION 2
 
@@ -55,6 +55,7 @@
 #define MEB_TELEMETRY_MIN_PERIOD_MS 100
 #define MEB_TELEMETRY_MAX_PERIOD_MS 60000
 #define MEB_BMS_SOC_POLL_PERIOD_MS 5000
+#define MEB_CAN_SIGNAL_STALE_MS 30000
 #define MEB_LED_PERIOD_MS 500
 
 // Heating auto-off. A user timer of 0 minutes disables the user-configured

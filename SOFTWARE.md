@@ -141,7 +141,7 @@ Supported methods:
 
 JSON-RPC success response examples:
 
-Heating response fields sourced from car CAN (`active`, `request`, `cooling_request`, `power_w`, `power_req_w`, `temperature_status`, and `soc_bms_percent`) are JSON `null` until their matching frame has been received at least once.
+Heating response fields sourced from car CAN (`active`, `request`, `cooling_request`, `power_w`, `power_req_w`, `temperature_status`, and `soc_bms_percent`) are JSON `null` until their matching frame has been received at least once, and return to `null` if the signal is not refreshed for 30 seconds.
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{"heating_enabled":true,"active":null,"request":null,"cooling_request":null,"power_w":null,"power_req_w":null,"temperature_status":null,"soc_bms_percent":null,"auto_off_timer_enabled":false,"auto_off_timer_minutes":0,"auto_off_remaining_minutes":180}}
@@ -266,7 +266,7 @@ python scripts\meb_ble_client.py --disable
 
 The firmware also emits versioned NDJSON events. These are not JSON-RPC responses, so host software should dispatch them by `type`.
 
-CAN-derived values are emitted as JSON `null` until the matching car CAN frame has been received at least once. After that first valid frame, the latest value is emitted as a number.
+CAN-derived values are emitted as JSON `null` until the matching car CAN frame has been received at least once. After that first valid frame, the latest value is emitted as a number until the signal has not been refreshed for 30 seconds, after which it returns to `null`.
 
 Telemetry event:
 
