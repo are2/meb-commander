@@ -9,6 +9,7 @@ idf_component_register(
         "ota_update.c"
         "power_management.c"
         "serial_console.c"
+        "settings.c"
         "status_led.c"
     INCLUDE_DIRS "."
     REQUIRES

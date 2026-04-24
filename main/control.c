@@ -4,14 +4,17 @@
 #include "can_bus.h"
 #include "diagnostics.h"
 #include "serial_console.h"
+#include "settings.h"
 
 #include <inttypes.h>
 #include <stdio.h>
 
+#include "esp_check.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "nvs.h"
 
 #define CONTROL_TASK_STACK_SIZE 4096
 #define CONTROL_TASK_PRIORITY 6
@@ -21,6 +24,18 @@
 static const char *TAG = "control";
 static portMUX_TYPE s_telemetry_lock = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_telemetry_interval_ms = MEB_TELEMETRY_PERIOD_MS;
+
+static bool telemetry_interval_is_valid(uint32_t interval_ms)
+{
+    return interval_ms >= MEB_TELEMETRY_MIN_PERIOD_MS && interval_ms <= MEB_TELEMETRY_MAX_PERIOD_MS;
+}
+
+static void set_telemetry_interval_in_memory(uint32_t interval_ms)
+{
+    taskENTER_CRITICAL(&s_telemetry_lock);
+    s_telemetry_interval_ms = interval_ms;
+    taskEXIT_CRITICAL(&s_telemetry_lock);
+}
 
 uint32_t meb_control_get_telemetry_interval_ms(void)
 {
@@ -35,15 +50,39 @@ uint32_t meb_control_get_telemetry_interval_ms(void)
 
 esp_err_t meb_control_set_telemetry_interval_ms(uint32_t interval_ms)
 {
-    if (interval_ms < MEB_TELEMETRY_MIN_PERIOD_MS || interval_ms > MEB_TELEMETRY_MAX_PERIOD_MS) {
+    if (!telemetry_interval_is_valid(interval_ms)) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    taskENTER_CRITICAL(&s_telemetry_lock);
-    s_telemetry_interval_ms = interval_ms;
-    taskEXIT_CRITICAL(&s_telemetry_lock);
+    ESP_RETURN_ON_ERROR(meb_settings_set_telemetry_interval_ms(interval_ms),
+                        TAG, "failed to persist telemetry interval");
 
+    set_telemetry_interval_in_memory(interval_ms);
     meb_diag_record_eventf("control", "telemetry_interval", "ms=%" PRIu32, interval_ms);
+    return ESP_OK;
+}
+
+static esp_err_t load_telemetry_interval_setting(void)
+{
+    uint32_t interval_ms = 0;
+    esp_err_t err = meb_settings_get_telemetry_interval_ms(&interval_ms);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        return ESP_OK;
+    }
+
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    if (!telemetry_interval_is_valid(interval_ms)) {
+        ESP_LOGW(TAG, "ignoring persisted telemetry interval outside allowed range: %" PRIu32, interval_ms);
+        meb_diag_record_eventf("control", "telemetry_interval_invalid", "ms=%" PRIu32, interval_ms);
+        return ESP_OK;
+    }
+
+    set_telemetry_interval_in_memory(interval_ms);
+    ESP_LOGI(TAG, "loaded telemetry interval from NVS: %" PRIu32 " ms", interval_ms);
+    meb_diag_record_eventf("control", "telemetry_interval_loaded", "ms=%" PRIu32, interval_ms);
     return ESP_OK;
 }
 
@@ -217,6 +256,8 @@ static void telemetry_task(void *arg)
 
 esp_err_t meb_control_start(void)
 {
+    ESP_RETURN_ON_ERROR(load_telemetry_interval_setting(), TAG, "failed to load telemetry interval setting");
+
     BaseType_t ok = xTaskCreate(control_task, "control", CONTROL_TASK_STACK_SIZE, NULL, CONTROL_TASK_PRIORITY, NULL);
     if (ok != pdPASS) {
         return ESP_ERR_NO_MEM;

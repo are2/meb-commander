@@ -6,6 +6,7 @@
 #include "diagnostics.h"
 #include "power_management.h"
 #include "serial_console.h"
+#include "settings.h"
 #include "status_led.h"
 
 #include "esp_check.h"
@@ -16,6 +17,7 @@ static const char *TAG = "meb-preheat";
 void app_main(void)
 {
     ESP_ERROR_CHECK(meb_diag_init());
+    ESP_ERROR_CHECK(meb_settings_init());
     ESP_ERROR_CHECK(meb_state_init());
     ESP_ERROR_CHECK(meb_power_management_init());
     ESP_ERROR_CHECK(meb_serial_console_init());

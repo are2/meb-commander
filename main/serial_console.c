@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "driver/uart.h"
+#include "esp_err.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -669,8 +670,13 @@ static void handle_telemetry_set_interval(bool has_id, const char *id_token, con
     }
 
     esp_err_t err = meb_control_set_telemetry_interval_ms(interval_ms);
-    if (err != ESP_OK) {
+    if (err == ESP_ERR_INVALID_ARG) {
         send_rpc_error(id_token, JSONRPC_INVALID_PARAMS, "params.ms outside allowed range");
+        return;
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "failed to persist telemetry interval: %s", esp_err_to_name(err));
+        send_rpc_error(id_token, JSONRPC_SERVER_ERROR, "Failed to store telemetry interval");
         return;
     }
 

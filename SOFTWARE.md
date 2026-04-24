@@ -161,7 +161,7 @@ JSON-RPC error response example:
 {"jsonrpc":"2.0","id":4,"error":{"code":-32602,"message":"params.ms outside allowed range"}}
 ```
 
-`telemetry.set_interval` accepts `params.ms` from `100` to `60000`.
+`telemetry.set_interval` accepts `params.ms` from `100` to `60000`. Accepted values are stored in NVS and restored on the next boot.
 
 `heating.set_auto_off_timer` accepts `params.minutes`. A value greater than zero starts that many minutes of user auto-off countdown whenever heating is enabled; setting `minutes` to `0` disables the user timer. The safety auto-off limit still turns heating off after 180 minutes by default even when the user timer is disabled. Build config `MEB_DISABLE_SAFETY_AUTO_OFF` disables that safety limit, and `MEB_SAFETY_AUTO_OFF_MINUTES` changes the default 3 hour duration.
 

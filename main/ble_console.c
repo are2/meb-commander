@@ -6,6 +6,7 @@
 
 #include "serial_console.h"
 #include "diagnostics.h"
+#include "settings.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -25,7 +26,6 @@
 #include "host/util/util.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
-#include "nvs_flash.h"
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
 
@@ -359,17 +359,6 @@ static void command_task(void *arg)
     }
 }
 
-static esp_err_t init_nvs(void)
-{
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_RETURN_ON_ERROR(nvs_flash_erase(), TAG, "failed to erase NVS");
-        err = nvs_flash_init();
-    }
-
-    return err;
-}
-
 esp_err_t meb_ble_console_init(void)
 {
     s_command_queue = xQueueCreate(BLE_CMD_QUEUE_DEPTH, sizeof(ble_command_t));
@@ -382,7 +371,7 @@ esp_err_t meb_ble_console_init(void)
         return ESP_ERR_NO_MEM;
     }
 
-    ESP_RETURN_ON_ERROR(init_nvs(), TAG, "failed to initialize NVS for BLE");
+    ESP_RETURN_ON_ERROR(meb_settings_init(), TAG, "failed to initialize NVS for BLE");
     ESP_RETURN_ON_ERROR(nimble_port_init(), TAG, "failed to initialize NimBLE");
 
     ble_hs_cfg.reset_cb = on_reset;
