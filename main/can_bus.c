@@ -410,6 +410,15 @@ esp_err_t meb_can_send_heat_request(void)
     return transmit_fd_frame(MEB_CAN_ID_DIAG_REQ, data, "heat_request");
 }
 
+esp_err_t meb_can_request_bms_soc(void)
+{
+    static const uint8_t data[8] = {
+        0x03, 0x22, 0x02, 0x8C, 0x55, 0x55, 0x55, 0x55,
+    };
+
+    return transmit_fd_frame(MEB_CAN_ID_DIAG_REQ, data, "bms_soc");
+}
+
 #if MEB_CAN_TEST_TX_ENABLED
 static void can_test_tx_task(void *arg)
 {

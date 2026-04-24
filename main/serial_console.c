@@ -287,11 +287,18 @@ static void send_heating_state_result(bool has_id, const char *id_token)
     meb_state_snapshot_t state;
     meb_state_get_snapshot(&state);
     char remaining_minutes[16];
+    char bms_soc_percent[16];
     format_auto_off_remaining(&state, remaining_minutes, sizeof(remaining_minutes));
+    if (state.bms_soc_valid) {
+        snprintf(bms_soc_percent, sizeof(bms_soc_percent), "%.1f", state.bms_soc_percent);
+    } else {
+        snprintf(bms_soc_percent, sizeof(bms_soc_percent), "null");
+    }
 
     send_rpc_result(has_id, id_token,
                     "{\"heating_enabled\":%s,\"active\":%u,\"request\":%u,\"cooling_request\":%u,"
                     "\"power_w\":%u,\"power_req_w\":%u,\"temperature_status\":%u,"
+                    "\"soc_bms_percent\":%s,"
                     "\"auto_off_timer_enabled\":%s,\"auto_off_timer_minutes\":%" PRIu32 ","
                     "\"auto_off_remaining_minutes\":%s}",
                     state.heating_enabled ? "true" : "false",
@@ -301,6 +308,7 @@ static void send_heating_state_result(bool has_id, const char *id_token)
                     state.power_battery_heating_watt,
                     state.power_battery_heating_req_watt,
                     state.temperature_status_charge,
+                    bms_soc_percent,
                     state.auto_off_timer_enabled ? "true" : "false",
                     state.auto_off_timer_minutes,
                     remaining_minutes);

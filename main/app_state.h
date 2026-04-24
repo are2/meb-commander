@@ -15,6 +15,8 @@ typedef struct {
     double max_charge_current_amp;
     double battery_min_temp;
     double battery_max_temp;
+    bool bms_soc_valid;
+    double bms_soc_percent;
     bool session_error;
     bool heating_enabled;
     bool auto_off_timer_enabled;

@@ -102,7 +102,7 @@ Received CAN IDs:
 
 | CAN ID | Purpose | State updated |
 | --- | --- | --- |
-| `0x17FE007B` | Diagnostic response | Detects routine/session error `03 7F 2F 7F`. |
+| `0x17FE007B` | Diagnostic response | Detects routine/session error `03 7F 2F 7F` and reads BMS SoC from `04 62 02 8C XX`. |
 | `0x12DD54D2` | Battery heating status | Active flag, heating/cooling request, heating power bytes. |
 | `0x1A5555B2` | Charging optimization | Battery temperature status for charging. |
 | `0x12DD54D0` | Dynamic charge limits | Predicted max charge power and current. |
@@ -114,6 +114,7 @@ Transmitted CAN frames:
 | --- | --- | --- |
 | `0x17FC007B` | `02 10 03 00 00 00 00 00` | After a diagnostic negative response to switch session. |
 | `0x17FC007B` | `07 2F 80 37 03 00 05 32` | Every 500 ms when user heating is enabled and battery temperature status is under optimal. |
+| `0x17FC007B` | `03 22 02 8C 55 55 55 55` | Every 5 seconds to read BMS state of charge. |
 
 ## UART USB Protocol
 
@@ -141,8 +142,8 @@ Supported methods:
 JSON-RPC success response examples:
 
 ```json
-{"jsonrpc":"2.0","id":1,"result":{"heating_enabled":true,"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0,"temperature_status":1,"auto_off_timer_enabled":false,"auto_off_timer_minutes":0,"auto_off_remaining_minutes":180}}
-{"jsonrpc":"2.0","id":2,"result":{"heating_enabled":true,"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0,"temperature_status":1,"auto_off_timer_enabled":false,"auto_off_timer_minutes":0,"auto_off_remaining_minutes":180}}
+{"jsonrpc":"2.0","id":1,"result":{"heating_enabled":true,"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0,"temperature_status":1,"soc_bms_percent":50.0,"auto_off_timer_enabled":false,"auto_off_timer_minutes":0,"auto_off_remaining_minutes":180}}
+{"jsonrpc":"2.0","id":2,"result":{"heating_enabled":true,"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0,"temperature_status":1,"soc_bms_percent":50.0,"auto_off_timer_enabled":false,"auto_off_timer_minutes":0,"auto_off_remaining_minutes":180}}
 {"jsonrpc":"2.0","id":3,"result":{"version":"0.4.0","about":"MEB preheat CAN controller","protocol_version":2,"release_build":false,"build_mode":"development","serial":{"uart":0,"baud_rate":115200,"tx_gpio":11,"rx_gpio":12},"ble":{"name":"MEB-Preheat","service_uuid":"7e57c000-f8aa-4a1f-9af3-9c0b7fd90e00","rx_uuid":"7e57c001-f8aa-4a1f-9af3-9c0b7fd90e00","tx_uuid":"7e57c002-f8aa-4a1f-9af3-9c0b7fd90e00"},"telemetry_interval_ms":1000,"heating":{"safety_auto_off_enabled":true,"safety_auto_off_minutes":180},"can":{"tx_gpio":4,"rx_gpio":5,"bitrate":500000,"data_bitrate":2000000}}}
 {"jsonrpc":"2.0","id":4,"result":{"uptime_ms":123456,"reset":{"reason":1,"name":"poweron"}}}
 {"jsonrpc":"2.0","id":5,"result":{"resetting":true,"delay_ms":500}}
@@ -266,7 +267,7 @@ The firmware also emits versioned NDJSON events. These are not JSON-RPC response
 Telemetry event:
 
 ```json
-{"v":2,"type":"telemetry","ts_ms":123456,"heating":{"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0},"thermal":{"status":0},"predicted":{"power_kw":0.0,"current_a":0.0},"battery_temp_c":{"min":0.0,"max":0.0},"control":{"heating_enabled":false,"auto_off_timer_minutes":0,"auto_off_remaining_minutes":null}}
+{"v":2,"type":"telemetry","ts_ms":123456,"battery":{"soc_bms_percent":50.0},"heating":{"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0},"thermal":{"status":0},"predicted":{"power_kw":0.0,"current_a":0.0},"battery_temp_c":{"min":0.0,"max":0.0},"control":{"heating_enabled":false,"auto_off_timer_minutes":0,"auto_off_remaining_minutes":null}}
 ```
 
 Other events:

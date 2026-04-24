@@ -26,4 +26,5 @@ esp_err_t meb_can_init(void);
 esp_err_t meb_can_start_test_tx(void);
 esp_err_t meb_can_request_diag_session(void);
 esp_err_t meb_can_send_heat_request(void);
+esp_err_t meb_can_request_bms_soc(void);
 void meb_can_get_diagnostics(meb_can_diagnostics_t *diag);

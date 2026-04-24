@@ -201,11 +201,21 @@ bool meb_state_take_session_error(void)
 
 void meb_state_update_diag_response(const uint8_t *data, uint16_t len)
 {
-    if (!data || len < 4) {
+    if (!data) {
         return;
     }
 
-    if (data[0] == 0x03 && data[1] == 0x7F && data[2] == 0x2F && data[3] == 0x7F) {
+    if (len >= 5 && data[0] == 0x04 && data[1] == 0x62 && data[2] == 0x02 && data[3] == 0x8C) {
+        if (data[4] <= 250) {
+            lock_state();
+            s_state.bms_soc_valid = true;
+            s_state.bms_soc_percent = data[4] / 2.5;
+            unlock_state();
+        }
+        return;
+    }
+
+    if (len >= 4 && data[0] == 0x03 && data[1] == 0x7F && data[2] == 0x2F && data[3] == 0x7F) {
         lock_state();
         s_state.session_error = true;
         unlock_state();

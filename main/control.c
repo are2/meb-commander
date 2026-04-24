@@ -82,12 +82,21 @@ static void control_task(void *arg)
 static void telemetry_task(void *arg)
 {
     (void)arg;
+    int64_t last_soc_request_us = -((int64_t)MEB_BMS_SOC_POLL_PERIOD_MS * 1000LL);
 
     while (1) {
         uint32_t interval_ms = meb_control_get_telemetry_interval_ms();
+        int64_t now_us = esp_timer_get_time();
+        if ((now_us - last_soc_request_us) >= ((int64_t)MEB_BMS_SOC_POLL_PERIOD_MS * 1000LL)) {
+            if (meb_can_request_bms_soc() == ESP_OK) {
+                last_soc_request_us = now_us;
+            }
+        }
+
         meb_state_snapshot_t state;
         meb_state_get_snapshot(&state);
         char remaining_minutes[16];
+        char bms_soc_percent[16];
 
         if (state.auto_off_remaining_valid) {
             snprintf(remaining_minutes, sizeof(remaining_minutes), "%" PRIu32, state.auto_off_remaining_minutes);
@@ -95,10 +104,19 @@ static void telemetry_task(void *arg)
             snprintf(remaining_minutes, sizeof(remaining_minutes), "null");
         }
 
+        if (state.bms_soc_valid) {
+            snprintf(bms_soc_percent, sizeof(bms_soc_percent), "%.1f", state.bms_soc_percent);
+        } else {
+            snprintf(bms_soc_percent, sizeof(bms_soc_percent), "null");
+        }
+
         meb_serial_printf("{"
                           "\"v\":%d,"
                           "\"type\":\"telemetry\","
                           "\"ts_ms\":%llu,"
+                          "\"battery\":{"
+                              "\"soc_bms_percent\":%s"
+                          "},"
                           "\"heating\":{"
                               "\"active\":%u,"
                               "\"request\":%u,"
@@ -125,6 +143,7 @@ static void telemetry_task(void *arg)
                           "}\n",
                           MEB_PREHEATER_PROTOCOL_VERSION,
                           (unsigned long long)(esp_timer_get_time() / 1000ULL),
+                          bms_soc_percent,
                           state.battery_heating_active,
                           state.heating_request,
                           state.cooling_request,
