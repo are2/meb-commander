@@ -5,7 +5,7 @@ This project has two build profiles:
 - Development build: default profile for normal coding, JTAG flashing, and debugging.
 - Production build: low-power profile for installed firmware.
 
-The development profile is intentionally JTAG-safe. The production profile enables automatic light sleep and BLE modem sleep, which can make USB-JTAG flashing unreliable after that firmware is running.
+The development profile is intentionally JTAG-safe and keeps verbose crash diagnostics enabled. The production profile enables automatic light sleep and BLE modem sleep, and disables verbose crash dumps so installed firmware reboots quickly and keeps UART output compact.
 
 ## Development Build
 
@@ -31,6 +31,18 @@ Development power settings:
 # CONFIG_FREERTOS_USE_TICKLESS_IDLE is not set
 # CONFIG_ESP_MODEM_CLOCK_ENABLE_CHECKING is not set
 ```
+
+Development crash diagnostics:
+
+```text
+CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
+CONFIG_ESP_SYSTEM_PANIC_REBOOT_DELAY_SECONDS=10
+# CONFIG_ESP_SYSTEM_NO_BACKTRACE is not set
+CONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y
+CONFIG_ESP_COREDUMP_ENABLE_TO_UART=y
+```
+
+ESP-IDF supports one core dump destination at a time. Development defaults use UART so `idf.py monitor` can decode crashes live. The partition table also reserves a `coredump` flash partition, so a debug build can be switched from UART core dumps to flash core dumps with `menuconfig` if unattended postmortem capture is needed.
 
 Use this profile while flashing over USB-JTAG or debugging with OpenOCD.
 
@@ -78,6 +90,15 @@ CONFIG_BT_LE_SLEEP_ENABLE=y
 CONFIG_ESP_MODEM_CLOCK_ENABLE_CHECKING=y
 CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP=y
 CONFIG_PM_SLP_DISABLE_GPIO=y
+```
+
+Production crash diagnostics:
+
+```text
+CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
+CONFIG_ESP_SYSTEM_PANIC_REBOOT_DELAY_SECONDS=0
+CONFIG_ESP_SYSTEM_NO_BACKTRACE=y
+CONFIG_ESP_COREDUMP_ENABLE_TO_NONE=y
 ```
 
 Production intentionally keeps these more aggressive sleep options disabled:

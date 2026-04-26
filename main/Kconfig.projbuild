@@ -6,7 +6,9 @@ menu "MEB Preheat"
         help
             Enables production-oriented firmware settings. Development builds
             should leave this disabled so USB-JTAG flashing/debugging remains
-            reliable.
+            reliable. The development sdkconfig defaults also keep panic
+            backtraces, a reboot delay, and UART core dumps enabled for crash
+            analysis; production defaults turn those verbose diagnostics off.
 
     config MEB_AUTOMATIC_LIGHT_SLEEP
         bool "Enable automatic light sleep"

@@ -6,7 +6,7 @@ The command channel is UART0 at 115200 bit/s through the development board's USB
 
 ## Build Profiles
 
-The default build is the development profile. It keeps ESP-IDF automatic light sleep, BLE sleep, and tickless idle disabled so USB-JTAG flashing/debugging remains reliable.
+The default build is the development profile. It keeps ESP-IDF automatic light sleep, BLE sleep, and tickless idle disabled so USB-JTAG flashing/debugging remains reliable. It also enables panic register printing, frame-pointer backtraces, a 10 second panic reboot delay, and UART core dumps for crash analysis.
 
 Production mode uses a separate generated config file and build directory:
 
@@ -14,7 +14,7 @@ Production mode uses a separate generated config file and build directory:
 .\scripts\build_production.ps1
 ```
 
-That command uses the normal `sdkconfig` as the base, applies `sdkconfig.defaults.production` as production overrides, writes generated config to `sdkconfig.production`, and places output under `build-production`. Production mode enables automatic light sleep and BLE modem sleep, so flash it with UART/serial if USB-JTAG becomes unreliable after the production firmware is running.
+That command uses the normal `sdkconfig` as the base, applies `sdkconfig.defaults.production` as production overrides, writes generated config to `sdkconfig.production`, and places output under `build-production`. Production mode enables automatic light sleep and BLE modem sleep, disables verbose backtraces and core dumps, and reboots immediately after panic output, so flash it with UART/serial if USB-JTAG becomes unreliable after the production firmware is running.
 
 ## Runtime Flow
 
