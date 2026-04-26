@@ -26,6 +26,7 @@
 #define MEB_CAN_ARB_SAMPLE_POINT_PERMILL 875
 #define MEB_CAN_DATA_SAMPLE_POINT_PERMILL 750
 #define MEB_CAN_DATA_SSP_PERMILL 700
+#define TX_SLOT_COUNT MEB_TWAI_TX_QUEUE_DEPTH
 
 typedef struct {
     twai_frame_header_t header;
@@ -33,9 +34,18 @@ typedef struct {
     uint16_t len;
 } meb_can_rx_message_t;
 
+typedef struct {
+    twai_frame_t frame;
+    uint8_t data[TWAIFD_FRAME_MAX_LEN];
+    uint32_t id;
+    bool in_use;
+} meb_can_tx_slot_t;
+
 static const char *TAG = "can_bus";
 static twai_node_handle_t s_twai_node;
 static QueueHandle_t s_rx_queue;
+static portMUX_TYPE s_tx_slot_lock = portMUX_INITIALIZER_UNLOCKED;
+static meb_can_tx_slot_t s_tx_slots[TX_SLOT_COUNT];
 static volatile uint32_t s_rx_queue_overflow_count;
 static volatile uint32_t s_error_event_count;
 static volatile uint32_t s_last_error_flags;
@@ -46,6 +56,75 @@ static volatile uint32_t s_last_new_state;
 static volatile uint32_t s_state_entry_count[4];
 static volatile uint32_t s_tx_failure_count;
 static volatile uint32_t s_last_tx_failure_id;
+static volatile uint32_t s_tx_slot_exhaustion_count;
+
+static meb_can_tx_slot_t *alloc_tx_slot(uint32_t id, const uint8_t *data, size_t len)
+{
+    meb_can_tx_slot_t *slot = NULL;
+
+    if (!data || len > TWAIFD_FRAME_MAX_LEN) {
+        return NULL;
+    }
+
+    taskENTER_CRITICAL(&s_tx_slot_lock);
+    for (size_t i = 0; i < TX_SLOT_COUNT; i++) {
+        if (!s_tx_slots[i].in_use) {
+            slot = &s_tx_slots[i];
+            slot->in_use = true;
+            slot->id = id;
+            memcpy(slot->data, data, len);
+            slot->frame = (twai_frame_t) {
+                .header = {
+                    .id = id,
+                    .dlc = twaifd_len2dlc(len),
+                    .ide = 1,
+                    .fdf = 1,
+                    .brs = 1,
+                },
+                .buffer = slot->data,
+                .buffer_len = len,
+            };
+            break;
+        }
+    }
+    taskEXIT_CRITICAL(&s_tx_slot_lock);
+
+    return slot;
+}
+
+static bool release_tx_slot_from_isr(const twai_frame_t *frame, uint32_t *id)
+{
+    if (!frame) {
+        return false;
+    }
+
+    bool released = false;
+    taskENTER_CRITICAL_ISR(&s_tx_slot_lock);
+    for (size_t i = 0; i < TX_SLOT_COUNT; i++) {
+        if (&s_tx_slots[i].frame == frame) {
+            if (id) {
+                *id = s_tx_slots[i].id;
+            }
+            s_tx_slots[i].in_use = false;
+            released = true;
+            break;
+        }
+    }
+    taskEXIT_CRITICAL_ISR(&s_tx_slot_lock);
+
+    return released;
+}
+
+static void release_tx_slot(meb_can_tx_slot_t *slot)
+{
+    if (!slot) {
+        return;
+    }
+
+    taskENTER_CRITICAL(&s_tx_slot_lock);
+    slot->in_use = false;
+    taskEXIT_CRITICAL(&s_tx_slot_lock);
+}
 
 static uint16_t frame_payload_len(const twai_frame_header_t *header)
 {
@@ -83,9 +162,11 @@ static bool twai_tx_done_callback(twai_node_handle_t handle, const twai_tx_done_
     (void)handle;
     (void)user_ctx;
 
+    uint32_t done_id = 0;
+    (void)release_tx_slot_from_isr(edata->done_tx_frame, &done_id);
     if (!edata->is_tx_success) {
         s_tx_failure_count++;
-        s_last_tx_failure_id = edata->done_tx_frame ? edata->done_tx_frame->header.id : 0;
+        s_last_tx_failure_id = done_id;
     }
 
     return false;
@@ -344,6 +425,15 @@ static void report_isr_diagnostics(void)
         ESP_LOGW(TAG, "TWAI TX failures=%" PRIu32 " last_id=0x%" PRIX32, failures, last_id);
         meb_diag_record_eventf("can", "tx_failed_isr", "count=%" PRIu32 " id=0x%" PRIX32, failures, last_id);
     }
+
+    static uint32_t last_tx_slot_exhaustion_count;
+    uint32_t tx_slot_exhaustion_count = s_tx_slot_exhaustion_count;
+    if (tx_slot_exhaustion_count != last_tx_slot_exhaustion_count) {
+        uint32_t dropped = tx_slot_exhaustion_count - last_tx_slot_exhaustion_count;
+        last_tx_slot_exhaustion_count = tx_slot_exhaustion_count;
+        ESP_LOGW(TAG, "TWAI TX slots exhausted %" PRIu32 " times", dropped);
+        meb_diag_record_eventf("can", "tx_slots_full", "count=%" PRIu32, dropped);
+    }
 }
 
 static void can_rx_task(void *arg)
@@ -371,20 +461,15 @@ static esp_err_t transmit_fd_frame(uint32_t id, const uint8_t data[8], const cha
         return ESP_ERR_INVALID_STATE;
     }
 
-    twai_frame_t frame = {
-        .header = {
-            .id = id,
-            .dlc = 8,
-            .ide = 1,
-            .fdf = 1,
-            .brs = 1,
-        },
-        .buffer = (uint8_t *)data,
-        .buffer_len = 8,
-    };
+    meb_can_tx_slot_t *slot = alloc_tx_slot(id, data, 8);
+    if (!slot) {
+        s_tx_slot_exhaustion_count++;
+        return ESP_ERR_TIMEOUT;
+    }
 
-    esp_err_t err = twai_node_transmit(s_twai_node, &frame, 500);
+    esp_err_t err = twai_node_transmit(s_twai_node, &slot->frame, 500);
     if (err != ESP_OK) {
+        release_tx_slot(slot);
         ESP_LOGW(TAG, "%s transmit failed: %s", name, esp_err_to_name(err));
         meb_diag_record_eventf("can", "tx_failed", "%s:%s", name, esp_err_to_name(err));
     }
