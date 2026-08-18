@@ -1,6 +1,6 @@
 # MEB Preheat ESP32
 
-This is the firmware overview and protocol reference. See [BUILD.md](BUILD.md) for development, production, and flashing instructions.
+This is the firmware overview and protocol reference. See [BUILD.md](BUILD.md) for development, production, and flashing instructions, and [HARDWARE.md](HARDWARE.md) for CAN-bus selection and ID.4 connection guidance.
 
 This firmware runs on an ESP32-C5 connected to a Volkswagen MEB platform CAN FD bus. It observes battery thermal status frames and, when the user enables heating over the devboard's UART USB or BLE connection, periodically sends the diagnostic routine to request battery preheating.
 
