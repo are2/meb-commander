@@ -20,7 +20,7 @@ The target is `esp32c5` with ESP-IDF `6.0.0` as recorded in `dependencies.lock`.
 - `main/status_led.*`: LED state display.
 - `main/Kconfig.projbuild`: Project configuration options.
 - `scripts/`: Host helper scripts for production builds, BLE commands, and OTA updates.
-- `BUILD.md` and `SOFTWARE.md`: User-facing build, runtime, protocol, and architecture documentation.
+- `BUILD.md` and `README.md`: User-facing build, runtime, protocol, and architecture documentation.
 
 ## Build And Verification
 
@@ -85,7 +85,7 @@ Tracked configuration and lock files are intentional:
 
 ## Documentation Expectations
 
-Update `SOFTWARE.md` when changing user-visible JSON-RPC methods, telemetry fields, BLE/UART behavior, CAN behavior, OTA behavior, LED meanings, or runtime flow.
+Update `README.md` when changing user-visible JSON-RPC methods, telemetry fields, BLE/UART behavior, CAN behavior, OTA behavior, LED meanings, or runtime flow.
 
 Update `BUILD.md` when changing build profiles, flashing instructions, power-management defaults, generated artifacts, or production build behavior.
 
