@@ -31,6 +31,7 @@ The target is `esp32c5` with ESP-IDF `6.0.0` as recorded in `dependencies.lock`.
 - `main/Kconfig.projbuild`: Project configuration options.
 - `scripts/`: Host helper scripts for production builds, BLE commands, and OTA updates.
 - `BUILD.md`, `README.md`, and `HARDWARE.md`: User-facing build, runtime, protocol, architecture, and vehicle connection documentation.
+- `MEB_NETWORKS_AND_MODULES.md`: MEB bus topology, module roles, ICAS connections, and automotive-Ethernet protocol notes.
 - `CAN_LOCK_UNLOCK_RESEARCH.md`: Evidence, constraints, security requirements, and validation plan for MEB central locking.
 
 ## Build And Verification
@@ -115,6 +116,10 @@ Update `README.md` when changing user-visible JSON-RPC methods, telemetry fields
 Update `BUILD.md` when changing build profiles, flashing instructions, power-management defaults, generated artifacts, or production build behavior.
 
 Update `HARDWARE.md` when changing hardware pin mappings, CAN-bus connection guidance, vehicle compatibility, or safety-critical wiring information.
+
+Update `MEB_NETWORKS_AND_MODULES.md` when bus roles, module connections,
+network rates, Ethernet protocols, ICAS architecture, or the confidence level
+of those mappings changes.
 
 Update `CAN_LOCK_UNLOCK_RESEARCH.md` when evidence, bus mappings, lock-state
 signals, authorization behavior, wiring assumptions, or the validation status

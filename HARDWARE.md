@@ -13,6 +13,10 @@ The Convenience CAN information is research material and has not yet been
 validated by this project. Always verify connector pins against official,
 VIN-specific wiring documentation for the exact model, market, and model year.
 
+For the wider logical topology, module roles, and the distinction between CAN
+and the 100/1000 Mbit/s automotive-Ethernet fabric, see
+[MEB_NETWORKS_AND_MODULES.md](MEB_NETWORKS_AND_MODULES.md).
+
 ## ID.4 CAN networks
 
 The ID.4 has several separate vehicle networks. The names and topology can
@@ -30,7 +34,14 @@ vary between model years, markets, battery versions, and wiring diagrams.
 The Volkswagen service-training material describes CAN-EV as the data bus for
 high-voltage components and B-CAN as the battery sub-bus. CAN-FD frames use a
 500 kbit/s arbitration phase and, on the relevant networks, a 2 Mbit/s data
-phase. See the [ID.4 service-training reference](https://esperformance.net/ssp/vw/SSP_718_EN.pdf).
+phase. See the
+[Volkswagen ID.4 Self Study Program 891213](https://static.nhtsa.gov/odi/tsbs/2021/MC-10189712-0001.pdf).
+
+These CAN networks are only part of the MEB communications architecture.
+J533/ICAS1 and J794/ICAS3 also use a switched 100BASE-T1/1000BASE-T1 Ethernet
+fabric for higher-bandwidth functions and diagnostics. That Ethernet network
+is electrically and logically different from CAN and is not supported by the
+current Commander hardware.
 
 ## Current and Planned CAN Interfaces
 

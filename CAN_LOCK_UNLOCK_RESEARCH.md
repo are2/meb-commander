@@ -32,6 +32,10 @@ The current MEB Commander hardware connects to EV-CAN after the gateway. That
 bus is used for battery-management, charging, and thermal functions. It is not
 the Convenience CAN on which central-locking traffic is present.
 
+See [MEB_NETWORKS_AND_MODULES.md](MEB_NETWORKS_AND_MODULES.md) for a wider
+overview of the CAN domains, ICAS1/ICAS3 module roles, and automotive-Ethernet
+fabric.
+
 ### Lock status and telematics command signals
 
 The community MEB DBC in comma.ai's opendbc repository identifies:

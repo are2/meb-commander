@@ -18,6 +18,8 @@ Documentation:
 - [BUILD.md](BUILD.md) describes development, production, and flashing.
 - [HARDWARE.md](HARDWARE.md) describes the current EV-CAN interface and the
   planned multi-bus hardware architecture.
+- [MEB_NETWORKS_AND_MODULES.md](MEB_NETWORKS_AND_MODULES.md) describes the MEB
+  CAN domains, ICAS1/ICAS3 connections, and automotive-Ethernet protocols.
 - [CAN_LOCK_UNLOCK_RESEARCH.md](CAN_LOCK_UNLOCK_RESEARCH.md) records the MEB
   central-locking research, evidence, constraints, and proposed validation
   process.
