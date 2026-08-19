@@ -4,7 +4,17 @@ Guidance for coding agents working in this repository.
 
 ## Project Overview
 
-This is ESP-IDF firmware for an ESP32-C5 based Volkswagen MEB battery preheat controller. The firmware listens to CAN FD/TWAI traffic, exposes newline-delimited JSON-RPC over UART0 and BLE, sends diagnostic preheat requests when enabled, reports telemetry, drives a WS2812 status LED, and supports chunked OTA updates.
+This is ESP-IDF firmware for an ESP32-C5 based Volkswagen MEB vehicle
+controller. The long-term project is a modular MEB Commander capable of
+working with more than one carefully isolated vehicle network. The current
+implementation listens to EV-CAN FD/TWAI traffic, exposes newline-delimited
+JSON-RPC over UART0 and BLE, sends diagnostic battery-preheat requests when
+enabled, reports telemetry, drives a WS2812 status LED, and supports chunked
+OTA updates.
+
+Door lock/unlock and a second Convenience CAN interface are research/planned
+features, not implemented behavior. Do not document them as working until they
+have been implemented and verified on the intended vehicle.
 
 The target is `esp32c5` with ESP-IDF `6.0.0` as recorded in `dependencies.lock`.
 
@@ -21,6 +31,7 @@ The target is `esp32c5` with ESP-IDF `6.0.0` as recorded in `dependencies.lock`.
 - `main/Kconfig.projbuild`: Project configuration options.
 - `scripts/`: Host helper scripts for production builds, BLE commands, and OTA updates.
 - `BUILD.md`, `README.md`, and `HARDWARE.md`: User-facing build, runtime, protocol, architecture, and vehicle connection documentation.
+- `CAN_LOCK_UNLOCK_RESEARCH.md`: Evidence, constraints, security requirements, and validation plan for MEB central locking.
 
 ## Build And Verification
 
@@ -51,6 +62,9 @@ There is no dedicated unit test suite in this repository at the moment. For firm
 - Return `esp_err_t` from initialization and setter APIs where failure is meaningful. Use ESP-IDF error codes rather than inventing local status enums unless the code already has a domain enum.
 - Keep shared state changes inside `app_state.*` or protected by the same FreeRTOS synchronization style already used in the touched module.
 - Do not do slow work in TWAI callbacks or ISR paths. Queue work to tasks, matching the existing CAN receive pattern.
+- Treat each physical vehicle network as a separate interface. Include the bus
+  in state and API naming where ambiguity is possible, and never add implicit
+  forwarding between EV-CAN and Convenience CAN.
 - Keep JSON-RPC and telemetry output compact and newline-delimited. Host tools rely on one complete JSON object per line and should be able to ignore non-JSON ESP-IDF log lines.
 - When adding a new C source file under `main/`, add it to `main/CMakeLists.txt`.
 - When adding project configuration, use `main/Kconfig.projbuild` and keep development-vs-production behavior explicit.
@@ -59,6 +73,17 @@ There is no dedicated unit test suite in this repository at the moment. For firm
 
 - Treat CAN IDs and diagnostic payloads as safety-sensitive. Preserve the existing MEB IDs and request bytes unless the change is specifically about that protocol.
 - Keep `MEB_CAN_TEST_TX_ENABLED` set to `0` before real vehicle use.
+- Convenience CAN research must begin in listen-only mode. Do not add or enable
+  a central-locking transmit path based only on a DBC signal name or an
+  unverified replay.
+- Access-control commands require authenticated and encrypted transport,
+  replay protection, rate limiting, vehicle-state checks, and a fail-closed
+  design. The current BLE characteristic does not enforce these requirements.
+- Do not expose door unlock through BLE, Wi-Fi, cellular, UART forwarding, or
+  another remote transport until the command path and firmware update path
+  provide suitable authentication and authorization.
+- A dual-bus device must use separate transceivers and must not electrically
+  join or indiscriminately bridge the vehicle networks.
 - Preserve the distinction between development and production power behavior. Development builds intentionally keep automatic light sleep, BLE modem sleep, and tickless idle disabled so USB-JTAG remains reliable. Production builds enable low-power behavior through `sdkconfig.defaults.production`.
 - The OTA partition table gives each app slot `0xE0000` bytes. Do not grow firmware features without checking binary size against the documented OTA slot limit.
 - Signed firmware and secure boot are not enabled. Do not describe SHA-256 OTA checks as authenticity guarantees; they are integrity checks only.
@@ -90,6 +115,10 @@ Update `README.md` when changing user-visible JSON-RPC methods, telemetry fields
 Update `BUILD.md` when changing build profiles, flashing instructions, power-management defaults, generated artifacts, or production build behavior.
 
 Update `HARDWARE.md` when changing hardware pin mappings, CAN-bus connection guidance, vehicle compatibility, or safety-critical wiring information.
+
+Update `CAN_LOCK_UNLOCK_RESEARCH.md` when evidence, bus mappings, lock-state
+signals, authorization behavior, wiring assumptions, or the validation status
+of central locking changes.
 
 Keep examples in the documentation aligned with the compact JSON style used by the firmware and Python helpers.
 

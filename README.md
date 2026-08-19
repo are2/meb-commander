@@ -1,10 +1,66 @@
-# MEB Preheat ESP32
+# MEB Commander
 
-This is the firmware overview and protocol reference. See [BUILD.md](BUILD.md) for development, production, and flashing instructions, and [HARDWARE.md](HARDWARE.md) for CAN-bus selection and ID.4 connection guidance.
+MEB Commander is ESP32-C5 firmware for observing and controlling selected
+functions on Volkswagen Group MEB vehicles. The project is intended to grow
+from its original battery-preheating implementation into a modular vehicle
+controller with multiple carefully isolated CAN interfaces and feature
+modules.
 
-This firmware runs on an ESP32-C5 connected to a Volkswagen MEB platform CAN FD bus. It observes battery thermal status frames and, when the user enables heating over the devboard's UART USB or BLE connection, periodically sends the diagnostic routine to request battery preheating.
+The current firmware still implements the inherited MEB battery-preheating
+controller: it listens to EV-CAN telemetry and sends the diagnostic request
+used to enable battery heating. Door lock/unlock support is **research only**
+and is not implemented. It requires access to the separate Convenience CAN,
+an understood authorization mechanism, and security hardening before it can
+be exposed through any remote command interface.
 
-The command channel is UART0 at 115200 bit/s through the development board's USB-to-UART bridge, usually the connector labelled `UART`. The same newline-delimited JSON-RPC and telemetry stream is also exposed over Bluetooth LE as a custom GATT service named `MEB-Preheat`. The active firmware pin mapping is defined in `main/app_config.h`. The native ESP32-C5 `USB` / USB Serial/JTAG peripheral remains enabled for normal USB-JTAG/debug enumeration, but it is not used for the JSON-RPC and telemetry protocol at this point.
+Documentation:
+
+- [BUILD.md](BUILD.md) describes development, production, and flashing.
+- [HARDWARE.md](HARDWARE.md) describes the current EV-CAN interface and the
+  planned multi-bus hardware architecture.
+- [CAN_LOCK_UNLOCK_RESEARCH.md](CAN_LOCK_UNLOCK_RESEARCH.md) records the MEB
+  central-locking research, evidence, constraints, and proposed validation
+  process.
+
+## Project Status
+
+| Area | Status |
+| --- | --- |
+| EV-CAN battery telemetry | Implemented |
+| Diagnostic battery-preheat request | Implemented |
+| UART0 and BLE JSON-RPC | Implemented |
+| Chunked OTA with SHA-256 integrity checking | Implemented |
+| Second TWAI interface for Convenience CAN | Planned |
+| Door lock-state monitoring | Research/planned |
+| Door lock/unlock control | Research only; not implemented |
+| Authenticated remote access and signed firmware | Required before access-control commands |
+
+```mermaid
+flowchart LR
+    Host[UART0 or BLE host] --> API[NDJSON JSON-RPC]
+    API --> Core[MEB Commander core]
+    Core --> Heat[Preheating module]
+    Heat --> EVCAN[EV-CAN / CAN FD]
+    Core -. planned .-> Access[Access-control module]
+    Access -. second TWAI + transceiver .-> Comfort[Convenience CAN / Classical CAN]
+    EVCAN --> Gateway[J533 / ICAS1]
+    Comfort --> Gateway
+```
+
+The command channel is UART0 at 115200 bit/s through the development board's
+USB-to-UART bridge, usually the connector labelled `UART`. The same
+newline-delimited JSON-RPC and telemetry stream is also exposed over Bluetooth
+LE using the inherited `MEB-Preheat` GATT name. The native ESP32-C5 `USB` / USB
+Serial/JTAG peripheral remains enabled for flashing and debugging but is not
+used for the application protocol. Firmware, BLE, source-file, and binary names
+will continue to contain `meb-preheat` until a separate code-level migration is
+performed.
+
+> **Security:** the current BLE command characteristic does not require an
+> encrypted or authenticated connection, and OTA images are not signed. The
+> existing transport is suitable for the preheating development prototype, not
+> for a remote door-unlock command. See
+> [CAN_LOCK_UNLOCK_RESEARCH.md](CAN_LOCK_UNLOCK_RESEARCH.md#security-requirements).
 
 ## Build Profiles
 
@@ -18,7 +74,7 @@ Production mode uses a separate generated config file and build directory:
 
 That command uses the normal `sdkconfig` as the base, applies `sdkconfig.defaults.production` as production overrides, writes generated config to `sdkconfig.production`, and places output under `build-production`. Production mode enables automatic light sleep and BLE modem sleep, disables verbose backtraces and core dumps, and reboots immediately after panic output, so flash it with UART/serial if USB-JTAG becomes unreliable after the production firmware is running.
 
-## Runtime Flow
+## Current Runtime Flow: Preheating
 
 ```mermaid
 flowchart TD
@@ -42,7 +98,7 @@ flowchart TD
     UserEnable --> LEDState
 ```
 
-## Control Logic
+## Current Preheating Control Logic
 
 ```mermaid
 stateDiagram-v2
@@ -78,9 +134,16 @@ LED meanings:
 | Red | Yes | Yes | Heating is requested by the user and active. |
 | Blue | No | Yes | The car has turned heating on by itself. |
 
-## CAN Behavior
+## Current EV-CAN Behavior
 
 The TWAI node is configured for CAN FD with 500 kbit/s arbitration bitrate and 2 Mbit/s data bitrate. Transmitted request frames use extended IDs, CAN FD format, and bit rate switching.
+
+This is not the MEB Convenience CAN used for central locking. J533/ICAS1
+separates the vehicle networks and should not be expected to forward an
+injected body-control message from EV-CAN. The planned access-control work
+therefore needs a second physical CAN interface; see
+[HARDWARE.md](HARDWARE.md#current-and-planned-can-interfaces) and
+[CAN_LOCK_UNLOCK_RESEARCH.md](CAN_LOCK_UNLOCK_RESEARCH.md).
 
 ```mermaid
 sequenceDiagram
@@ -148,7 +211,7 @@ Heating response fields sourced from car CAN (`active`, `request`, `cooling_requ
 ```json
 {"jsonrpc":"2.0","id":1,"result":{"heating_enabled":true,"active":null,"request":null,"cooling_request":null,"power_w":null,"power_req_w":null,"temperature_status":null,"soc_bms_percent":null,"auto_off_timer_enabled":false,"auto_off_timer_minutes":0,"auto_off_remaining_minutes":180}}
 {"jsonrpc":"2.0","id":2,"result":{"heating_enabled":true,"active":0,"request":0,"cooling_request":0,"power_w":0,"power_req_w":0,"temperature_status":1,"soc_bms_percent":50.0,"auto_off_timer_enabled":false,"auto_off_timer_minutes":0,"auto_off_remaining_minutes":180}}
-{"jsonrpc":"2.0","id":3,"result":{"version":"0.4.0","about":"MEB preheat CAN controller","protocol_version":2,"release_build":false,"build_mode":"development","serial":{"uart":0,"baud_rate":115200,"tx_gpio":11,"rx_gpio":12},"ble":{"name":"MEB-Preheat","service_uuid":"7e57c000-f8aa-4a1f-9af3-9c0b7fd90e00","rx_uuid":"7e57c001-f8aa-4a1f-9af3-9c0b7fd90e00","tx_uuid":"7e57c002-f8aa-4a1f-9af3-9c0b7fd90e00"},"telemetry_interval_ms":1000,"heating":{"safety_auto_off_enabled":true,"safety_auto_off_minutes":180},"can":{"tx_gpio":4,"rx_gpio":5,"bitrate":500000,"data_bitrate":2000000}}}
+{"jsonrpc":"2.0","id":3,"result":{"version":"0.6.1","about":"MEB preheat CAN controller","protocol_version":2,"release_build":false,"build_mode":"development","serial":{"uart":0,"baud_rate":115200,"tx_gpio":11,"rx_gpio":12},"ble":{"name":"MEB-Preheat","service_uuid":"7e57c000-f8aa-4a1f-9af3-9c0b7fd90e00","rx_uuid":"7e57c001-f8aa-4a1f-9af3-9c0b7fd90e00","tx_uuid":"7e57c002-f8aa-4a1f-9af3-9c0b7fd90e00"},"telemetry_interval_ms":1000,"heating":{"safety_auto_off_enabled":true,"safety_auto_off_minutes":180},"can":{"tx_gpio":4,"rx_gpio":5,"bitrate":500000,"data_bitrate":2000000}}}
 {"jsonrpc":"2.0","id":4,"result":{"uptime_ms":123456,"reset":{"reason":1,"name":"poweron"}}}
 {"jsonrpc":"2.0","id":5,"result":{"resetting":true,"delay_ms":500}}
 {"jsonrpc":"2.0","id":6,"result":{"uptime_ms":123456,"reset":{"reason":1,"name":"poweron"},"heap":{"free":210000,"minimum_free":198000,"free_8bit":210000,"minimum_free_8bit":198000,"largest_free_8bit_block":120000},"event_log":{"capacity":16,"count":1,"returned":1,"overwritten":0,"events":[{"seq":1,"ts_ms":8,"c":"system","e":"boot","d":"reset=poweron","heap":226000,"min_heap":226000}]}}}
@@ -250,6 +313,10 @@ The firmware advertises as `MEB-Preheat` and exposes the same newline-delimited 
 | RX characteristic | `7e57c001-f8aa-4a1f-9af3-9c0b7fd90e00` | Host writes JSON lines to ESP32-C5 |
 | TX characteristic | `7e57c002-f8aa-4a1f-9af3-9c0b7fd90e00` | ESP32-C5 sends notifications to host |
 
+The RX characteristic currently permits writes without requiring BLE link
+encryption, authentication, or bonding. Do not add security-sensitive commands
+such as door unlock to this interface until those requirements are enforced.
+
 The BLE transport preserves the same one-JSON-object-per-line framing used by UART. Subscribe to TX notifications, then write UTF-8 JSON plus `\n` to RX. Notifications may be split by BLE MTU; host software should concatenate notification payloads until a newline is received.
 
 The helper client uses Python Bleak:
@@ -279,12 +346,12 @@ Telemetry event:
 Other events:
 
 ```json
-{"v":2,"type":"device.ready","version":"0.4.0"}
+{"v":2,"type":"device.ready","version":"0.6.1"}
 {"v":2,"type":"control.diag_session_retry"}
 {"v":2,"type":"control.heating_auto_off","reason":"safety"}
 ```
 
-## Pins
+## Current Pins
 
 Pin defaults are defined in `main/app_config.h`.
 
@@ -295,6 +362,10 @@ Pin defaults are defined in `main/app_config.h`.
 | Status LED data | GPIO 27 | Output | WS2812/NeoPixel style single RGB LED, GRB order. |
 | UART0 TX | GPIO 12 | Output | Connects to the USB-UART bridge RXD input. Used for JSON-RPC responses and NDJSON telemetry at 115200 8N1. |
 | UART0 RX | GPIO 11 | Input | Connects to the USB-UART bridge TXD output. Used for JSON-RPC commands at 115200 8N1. |
+
+These pins cover the current EV-CAN implementation. GPIO assignments for a
+second Convenience CAN transceiver have not been selected and must not be
+inferred from this table.
 
 The native connector labelled `USB` / USB Serial/JTAG is kept enabled for debug/flash enumeration, but it is not used for this application protocol. No separate auxiliary USART1-style TX/RX command interface is implemented.
 
@@ -314,3 +385,4 @@ The native connector labelled `USB` / USB Serial/JTAG is kept enabled for debug/
 | `main/ble_console.c` | BLE GATT RX/TX bridge for the same JSON-RPC and telemetry stream. |
 | `scripts/meb_ble_client.py` | Python Bleak client for BLE JSON-RPC commands and telemetry notifications. |
 | `scripts/meb_ota_update.py` | Python OTA uploader for USB-to-UART and BLE firmware updates. |
+| `CAN_LOCK_UNLOCK_RESEARCH.md` | Evidence, constraints, and validation plan for MEB central locking. |

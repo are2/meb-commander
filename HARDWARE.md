@@ -1,11 +1,17 @@
-# Hardware and Vehicle Connection
+# Hardware Architecture and Vehicle Connection
 
-This document describes the CAN hardware used by the ESP32 controller and the
-intended connection to a Volkswagen ID.4. The vehicle wiring information is
-based on the [meb-preheat project](https://github.com/jagheterfredrik/meb-preheat)
+This document describes the current MEB Commander hardware and the planned
+multi-bus design for a Volkswagen MEB vehicle. The firmware presently uses one
+CAN-FD interface for battery telemetry and preheating. Future body functions,
+including central-locking research, require a second, electrically separate
+interface to the vehicle's Convenience CAN.
+
+Vehicle wiring information for the working EV-CAN connection is based on the
+[original meb-preheat project](https://github.com/jagheterfredrik/meb-preheat)
 and its [connection notes](https://github.com/jagheterfredrik/meb-preheat/blob/main/NOTES.md).
-Verify the connector and pinout against the wiring documentation for the exact
-vehicle before connecting anything.
+The Convenience CAN information is research material and has not yet been
+validated by this project. Always verify connector pins against official,
+VIN-specific wiring documentation for the exact model, market, and model year.
 
 ## ID.4 CAN networks
 
@@ -26,11 +32,21 @@ high-voltage components and B-CAN as the battery sub-bus. CAN-FD frames use a
 500 kbit/s arbitration phase and, on the relevant networks, a 2 Mbit/s data
 phase. See the [ID.4 service-training reference](https://esperformance.net/ssp/vw/SSP_718_EN.pdf).
 
-### Which bus this project uses
+## Current and Planned CAN Interfaces
 
-This controller is intended for **CAN-EV / EV-CAN**, after the vehicle gateway,
-where it can communicate with J840. It is not intended for the ordinary
-Powertrain CAN, B-CAN, LIN, or an arbitrary OBD diagnostic pair.
+MEB Commander must treat each vehicle network as a distinct trust and fault
+domain. Connecting to two buses does not make the device a general-purpose
+gateway, and firmware must not forward arbitrary frames between them.
+
+| Logical interface | Status | Vehicle network | Format and speed | Purpose |
+| --- | --- | --- | --- | --- |
+| CAN 0 | Implemented | CAN-EV / EV-CAN | CAN FD, 500 kbit/s arbitration, 2 Mbit/s data, extended IDs | Battery telemetry, SoC polling, and preheating diagnostics |
+| CAN 1 | Planned | Convenience CAN | Classical CAN, 500 kbit/s, primarily standard IDs | Body-state observation and central-locking research |
+
+The current controller is connected to **CAN-EV / EV-CAN** after the vehicle
+gateway, where it can communicate with the high-voltage battery management
+controller J840. It is not connected to Convenience CAN, Powertrain CAN,
+B-CAN, LIN, or an arbitrary OBD diagnostic pair.
 
 The ID.4 wiring documentation has an important naming trap: CAN-EV may be
 labelled “powertrain CAN bus” in wiring diagrams, while the actual drivetrain
@@ -38,7 +54,7 @@ Powertrain CAN is also labelled “powertrain CAN bus”. Use the connected cont
 units and the gateway connector pinout, not the label alone, to identify the
 bus.
 
-The firmware uses one CAN-FD controller with these settings:
+The implemented EV-CAN node uses these settings:
 
 | Setting | Value |
 | --- | --- |
@@ -53,7 +69,20 @@ The application filters and uses MEB frames such as `0x17FC007B`,
 Seeing these frames is a useful indication that the transceiver is connected
 to the intended network, but it is not a substitute for checking the wiring.
 
-## ESP32 controller wiring
+Volkswagen training material shows Convenience CAN as a separate 500 kbit/s
+network associated with J533/ICAS1, J519, and the access/start system J965.
+Central-locking traffic observed on that bus is not expected to be reachable
+by transmitting on EV-CAN because the gateway isolates and filters traffic by
+source network. See [CAN_LOCK_UNLOCK_RESEARCH.md](CAN_LOCK_UNLOCK_RESEARCH.md).
+
+## ESP32-C5 and Transceivers
+
+The ESP32-C5 contains two TWAI controllers, so the intended architecture can
+use one on-chip controller per vehicle bus. Each controller still requires its
+own external physical-layer transceiver. See the
+[ESP32-C5 TWAI documentation](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c5/api-reference/peripherals/twai.html).
+
+### Current EV-CAN wiring
 
 The ESP32-C5 pins connect to a **3.3 V-compatible CAN-FD transceiver**, not
 directly to the vehicle CAN wires:
@@ -71,6 +100,24 @@ Use a transceiver that supports CAN FD and the required 500 kbit/s / 2 Mbit/s
 timing. Confirm its logic-level and supply-voltage requirements before wiring
 it to the ESP32-C5.
 
+### Planned Convenience CAN wiring
+
+Convenience CAN requires a second ISO 11898-2 transceiver and a second pair of
+ESP32-C5 TX/RX GPIOs. Those GPIO assignments are deliberately **TBD** until the
+development-board routing, boot strapping pins, LED, UART, and low-power wake
+requirements have been checked together.
+
+The second interface should support:
+
+- Classical CAN at 500 kbit/s.
+- A hardware standby/silent mode controlled by the ESP32.
+- Low-current sleep and bus-wake behavior suitable for an installed device.
+- A listen-only commissioning mode in firmware.
+- 3.3 V-compatible logic levels.
+
+Do not connect one transceiver to both vehicle buses and do not electrically
+join EV-CAN and Convenience CAN.
+
 The CAN bus connection is separate from the host interfaces:
 
 - UART0 uses GPIO 11/12 at 115200 8N1 through the development board's UART
@@ -78,14 +125,14 @@ The CAN bus connection is separate from the host interfaces:
 - The native USB Serial/JTAG connector is used for flashing and debugging.
 - BLE is an optional wireless command and telemetry interface.
 
-## ID.4 gateway harness
+## ID.4 Gateway Harness
 
 The referenced ID.4 installation uses a pass-through harness at the original
 40-pin gateway connector behind the glove compartment. The harness is placed
 between the original gateway cable and the gateway connector, leaving the
 vehicle wiring intact.
 
-The referenced harness identifies these wires:
+The currently validated preheating installation identifies these wires:
 
 | Harness pin | Signal | Connect to |
 | --- | --- | --- |
@@ -105,7 +152,46 @@ The pin numbers above come from the referenced harness notes and are not a
 universal OBD-II pinout. They must be checked against the actual connector,
 market, model year, and harness before applying power.
 
-## Termination and connection procedure
+An independent ID.4 ICAS1 analysis labels gateway connector T40a pins 17 and
+18 as Convenience CAN-L and CAN-H respectively. This is a useful research lead,
+not a project-validated pinout. Confirm it in official wiring documentation
+before designing or installing a two-bus harness. See the
+[ICAS1 analysis](https://gorgias.me/posts/vw-id4-vehicle-control-analysis/).
+
+## Installed Power and Sleep Behavior
+
+The existing USB-C-powered development setup is not an always-on automotive
+power design. A permanently installed MEB Commander needs, at minimum:
+
+- A fused automotive-rated input stage and regulator.
+- Reverse-polarity, transient, and load-dump protection appropriate to the
+  selected vehicle supply connection.
+- Defined behavior during brownout and vehicle cranking/service events.
+- Low-quiescent-current regulators and CAN transceivers.
+- A sleep/wake design that allows every vehicle bus to return to sleep.
+
+Keeping Convenience CAN awake can discharge the vehicle's 12 V battery. The
+device must stop periodic traffic, place transceivers into the appropriate
+standby state, and verify that the vehicle network reaches sleep before the
+hardware is considered suitable for unattended installation. Remote wake from
+BLE, Wi-Fi, or cellular connectivity and vehicle-bus wake are separate design
+problems and must both be validated.
+
+## Command Transport Security
+
+The current BLE GATT RX characteristic does not require encryption,
+authentication, or bonding, and firmware OTA uses SHA-256 for integrity without
+signed images or secure boot. This is insufficient for any feature that can
+unlock the vehicle.
+
+Before access-control commands are implemented, the hardware and firmware
+design must provide authenticated and encrypted commands, replay protection,
+rate limiting, auditable command results, secure key storage, signed firmware,
+secure boot, and a fail-closed recovery path. Internet-range control also needs
+a deliberately selected Wi-Fi or cellular transport; BLE alone is only a
+short-range link.
+
+## Connection and Commissioning Procedure
 
 1. Build and test the ESP32/transceiver assembly away from the vehicle.
 2. Keep `MEB_CAN_TEST_TX_ENABLED` set to `0`. Do not enable the temporary test
@@ -113,7 +199,7 @@ market, model year, and harness before applying power.
 3. Power the controller from a known, regulated supply and confirm that the
    transceiver is not driving the bus during initial wiring checks.
 4. Install the pass-through harness at the gateway, with CAN-EV CAN-H and
-   CAN-L going to the transceiver.
+   CAN-L going only to the EV-CAN transceiver.
 5. Connect vehicle ground to controller/transceiver ground.
 6. Leave the transceiver's 120 ohm termination disabled. The vehicle network
    already provides its termination; adding another resistor can distort the
@@ -121,6 +207,8 @@ market, model year, and harness before applying power.
 7. Check CAN-H/CAN-L polarity and continuity before powering the controller.
 8. Power the controller, observe CAN diagnostics/telemetry, and only then
    enable heating deliberately.
+9. Commission any future Convenience CAN interface separately in listen-only
+   mode. Do not enable transmit while identifying wiring or traffic.
 
 Do not connect to the orange high-voltage system. The CAN wires are low-voltage
 communications wiring, but they are connected to safety-critical vehicle
@@ -135,8 +223,9 @@ may change gateway filtering, connector details, frame availability, or
 preheating behavior. Successful communication on one vehicle does not prove
 compatibility with another.
 
-This project transmits diagnostic and heating requests. It is not a passive
-CAN logger, and the documented CAN IDs and payloads should be treated as
+The current firmware transmits diagnostic and heating requests on EV-CAN. It
+is not a passive CAN logger. Door lock/unlock is not implemented. All CAN IDs,
+payloads, bus-routing rules, and future access-control behavior are
 safety-sensitive. Start with the vehicle stationary, keep a way to remove
 power from the controller, and stop if CAN errors, unexpected vehicle behavior,
 or loss of gateway communication occurs.
